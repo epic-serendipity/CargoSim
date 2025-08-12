@@ -300,10 +300,18 @@ class ThemeConfig:
 class RecordingConfig:
     record_live: bool = False
     record_format: str = "PNG frames"  # "PNG frames" | "MP4"
-    live_out_dir: str = "captures"
-    offline_out_file: str = "render.mp4"
+    live_out_dir: str = ""
+    offline_out_file: str = ""
     fps: int = 30
     frames_per_period: int = 10
+    include_hud: bool = True
+    include_debug: bool = False
+    include_panels: bool = True
+    show_watermark: bool = True
+    show_timestamp: bool = True
+    show_frame_index: bool = False
+    scale_percent: int = 100
+    include_labels: bool = False
 
     def to_json(self) -> dict:
         return {
@@ -313,6 +321,14 @@ class RecordingConfig:
             "offline_out_file": self.offline_out_file,
             "fps": self.fps,
             "frames_per_period": self.frames_per_period,
+            "include_hud": self.include_hud,
+            "include_debug": self.include_debug,
+            "include_panels": self.include_panels,
+            "show_watermark": self.show_watermark,
+            "show_timestamp": self.show_timestamp,
+            "show_frame_index": self.show_frame_index,
+            "scale_percent": self.scale_percent,
+            "include_labels": self.include_labels,
         }
 
     @staticmethod
@@ -320,10 +336,18 @@ class RecordingConfig:
         r = RecordingConfig()
         r.record_live = bool(d.get("record_live", r.record_live))
         r.record_format = d.get("record_format", r.record_format)
-        r.live_out_dir = d.get("live_out_dir", r.live_out_dir)
-        r.offline_out_file = d.get("offline_out_file", r.offline_out_file)
+        r.live_out_dir = os.path.abspath(d.get("live_out_dir", r.live_out_dir)) if d.get("live_out_dir") else ""
+        r.offline_out_file = os.path.abspath(d.get("offline_out_file", r.offline_out_file)) if d.get("offline_out_file") else ""
         r.fps = int(d.get("fps", r.fps))
         r.frames_per_period = int(d.get("frames_per_period", r.frames_per_period))
+        r.include_hud = bool(d.get("include_hud", r.include_hud))
+        r.include_debug = bool(d.get("include_debug", r.include_debug))
+        r.include_panels = bool(d.get("include_panels", r.include_panels))
+        r.show_watermark = bool(d.get("show_watermark", r.show_watermark))
+        r.show_timestamp = bool(d.get("show_timestamp", r.show_timestamp))
+        r.show_frame_index = bool(d.get("show_frame_index", r.show_frame_index))
+        r.scale_percent = int(d.get("scale_percent", r.scale_percent))
+        r.include_labels = bool(d.get("include_labels", r.include_labels))
         return r
 
 @dataclass
@@ -785,26 +809,32 @@ class LogisticsSim:
 # ------------------------- Recording Helpers -------------------------
 
 class Recorder:
-    def __init__(self, live: bool, out_dir: str, fps: int, fmt: str):
+    def __init__(self, live: bool, out_dir: str, fps: int, fmt: str, scale: int = 100):
         self.live = live
-        self.out_dir = out_dir
+        self.out_dir = os.path.abspath(out_dir) if out_dir else ""
         self.fps = fps
         self.fmt = fmt
+        self.scale = scale
         self.frame_idx = 0
-        if live:
-            os.makedirs(out_dir, exist_ok=True)
+        if live and self.out_dir:
+            os.makedirs(self.out_dir, exist_ok=True)
 
     def capture(self, surface):
-        if not self.live:
+        if not self.live or not self.out_dir:
             return
+        surf = surface
+        if self.scale != 100:
+            w = int(surface.get_width() * self.scale / 100)
+            h = int(surface.get_height() * self.scale / 100)
+            surf = pygame.transform.smoothscale(surface, (w, h))
         path = os.path.join(self.out_dir, f"frame_{self.frame_idx:06d}.png")
-        pygame.image.save(surface, path)
+        pygame.image.save(surf, path)
         self.frame_idx += 1
 
     def finalize(self):
         if not self.live:
             return None
-        if self.fmt == "MP4" and _HAS_IMAGEIO and self.frame_idx > 0:
+        if self.fmt == "MP4" and _HAS_IMAGEIO and self.frame_idx > 0 and self.out_dir:
             mp4_path = os.path.join(self.out_dir, "session.mp4")
             writer = imageio.get_writer(mp4_path, fps=self.fps, codec="libx264", quality=8)  # type: ignore
             for i in range(self.frame_idx):
@@ -868,10 +898,14 @@ class Renderer:
         self.debug_lines: List[str] = []
 
         rcfg = self.sim.cfg.recording
+        fmt = "MP4" if (rcfg.record_format == "MP4" and _HAS_IMAGEIO) else "PNG frames"
+        if rcfg.record_live and rcfg.record_format == "MP4" and not _HAS_IMAGEIO:
+            self.debug_lines.append("MP4 requires imageio + imageio-ffmpeg; recording PNG frames instead.")
         self.recorder = Recorder(live=rcfg.record_live,
                                  out_dir=rcfg.live_out_dir,
                                  fps=rcfg.fps,
-                                 fmt=("MP4" if (rcfg.record_format == "MP4" and _HAS_IMAGEIO) else "PNG frames"))
+                                 fmt=fmt,
+                                 scale=rcfg.scale_percent)
 
         # Pause menu button rects
         self._pm_rects = {}
@@ -980,7 +1014,8 @@ class Renderer:
         size = 14 if typ == "C-130" else 10
         pts = [(x, y - size), (x - size//2, y + size//2), (x + size//2, y + size//2)]
         pygame.draw.polygon(self.screen, color, pts)
-        if self.sim.cfg.show_aircraft_labels:
+        show_lbl = self.sim.cfg.show_aircraft_labels or (self.recorder.live and self.sim.cfg.recording.include_labels)
+        if show_lbl:
             t = self.font.render(name, True, self.white)
             self.screen.blit(t, (x - t.get_width()//2, y - size - 16))
 
@@ -998,6 +1033,25 @@ class Renderer:
             t = self.font.render(ln, True, self.white)
             self.screen.blit(t, (x0 + 10, y))
             y += 18
+
+    def draw_recording_overlays(self):
+        if not self.recorder.live:
+            return
+        rc = self.sim.cfg.recording
+        y = 16
+        if rc.show_watermark:
+            txt = self.bigfont.render("REC", True, (255,0,0))
+            self.screen.blit(txt, (self.width - txt.get_width() - 20, y))
+            y += txt.get_height() + 4
+        if rc.show_timestamp:
+            ts = f"t={self.sim.t} ({self.sim.half}, day {self.sim.t//2})"
+            t_surf = self.font.render(ts, True, self.white)
+            self.screen.blit(t_surf, (self.width - t_surf.get_width() - 20, y))
+            y += t_surf.get_height() + 4
+        if rc.show_frame_index:
+            fi = f"frame {self.recorder.frame_idx}";
+            f_surf = self.font.render(fi, True, self.white)
+            self.screen.blit(f_surf, (self.width - f_surf.get_width() - 20, y))
 
     def draw_fullscreen_side_panels(self):
         if not self.fullscreen:
@@ -1091,13 +1145,13 @@ class Renderer:
                 elif key == "offline":
                     # spawn a separate process to render offline video from saved config
                     try:
-                        cfg_path = CONFIG_FILE
-                        # ensure latest config saved
-                        save_config(self.sim.cfg)
-                        subprocess.Popen([sys.executable, os.path.abspath(__file__), "--offline-render"],
-                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        # brief on-screen confirmation
-                        self.debug_lines.append("Started offline render in background.")
+                        if not self.sim.cfg.recording.offline_out_file:
+                            self.debug_lines.append("Set offline output path in Control Panel before rendering.")
+                        else:
+                            save_config(self.sim.cfg)
+                            subprocess.Popen([sys.executable, os.path.abspath(__file__), "--offline-render"],
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            self.debug_lines.append("Started offline render in background.")
                     except Exception as e:
                         self.debug_lines.append(f"Offline render failed: {e}")
                 elif key == "menu":
@@ -1175,17 +1229,24 @@ class Renderer:
                     accum = 0.0
 
             # Render
+            rc = self.sim.cfg.recording
             self.screen.fill(self.bg)
             self.draw_spokes()
             self.draw_bars()
-            self.draw_hud()
+            if (not self.recorder.live) or rc.include_hud:
+                self.draw_hud()
             alpha = (accum / self.period_seconds) if self.period_seconds > 1e-3 else 0.0
             actions_current = self.sim.actions_log[-1] if self.sim.actions_log else []
             self.draw_aircraft(actions_current, alpha)
-            self.draw_fullscreen_side_panels()
-            self.draw_debug_overlay()
+            if (not self.recorder.live) or rc.include_panels:
+                self.draw_fullscreen_side_panels()
+            if self.debug_overlay and ((not self.recorder.live) or rc.include_debug):
+                self.draw_debug_overlay()
             if self.menu_open:
                 self.draw_pause_menu()
+            self.draw_recording_overlays()
+            if self.recorder.live:
+                self.recorder.capture(self.screen)
 
             pygame.display.flip()
 
@@ -1280,7 +1341,7 @@ def render_offline(cfg: SimConfig):
             self.panel_btn = blend(self.bg, self.hub_color, 0.45)
             self.panel_btn_fg = self.white
             self.overlay_backdrop_rgba = (*self.bg, 160)
-
+            self.recorder = Recorder(live=False, out_dir="", fps=0, fmt="PNG frames")
 
         def run(self): pass  # not used
 
@@ -1580,6 +1641,28 @@ class ControlGUI:
         ttk.Label(frm, text="Stats Mode").grid(row=3, column=0, sticky="w", pady=(6,0))
         self.stats_mode = tk.StringVar(value=self.cfg.stats_mode)
         ttk.OptionMenu(frm, self.stats_mode, self.cfg.stats_mode, "total", "average").grid(row=3, column=1, sticky="w")
+        ttk.Separator(frm).grid(row=4, column=0, columnspan=2, sticky="we", pady=8)
+
+        rec = ttk.LabelFrame(frm, text="Recording Overlays")
+        rec.grid(row=5, column=0, columnspan=2, sticky="we")
+        self.rec_hud = tk.BooleanVar(value=self.cfg.recording.include_hud)
+        ttk.Checkbutton(rec, text="Include HUD in recording", variable=self.rec_hud).grid(row=0, column=0, sticky="w")
+        self.rec_debug = tk.BooleanVar(value=self.cfg.recording.include_debug)
+        ttk.Checkbutton(rec, text="Include debug overlay", variable=self.rec_debug).grid(row=1, column=0, sticky="w")
+        self.rec_panels = tk.BooleanVar(value=self.cfg.recording.include_panels)
+        ttk.Checkbutton(rec, text="Include fullscreen side panels", variable=self.rec_panels).grid(row=2, column=0, sticky="w")
+        self.rec_watermark = tk.BooleanVar(value=self.cfg.recording.show_watermark)
+        ttk.Checkbutton(rec, text="Show 'REC' watermark", variable=self.rec_watermark).grid(row=3, column=0, sticky="w")
+        self.rec_timestamp = tk.BooleanVar(value=self.cfg.recording.show_timestamp)
+        ttk.Checkbutton(rec, text="Show timestamp", variable=self.rec_timestamp).grid(row=4, column=0, sticky="w")
+        self.rec_frameidx = tk.BooleanVar(value=self.cfg.recording.show_frame_index)
+        ttk.Checkbutton(rec, text="Show frame index", variable=self.rec_frameidx).grid(row=5, column=0, sticky="w")
+        self.rec_labels = tk.BooleanVar(value=self.cfg.recording.include_labels)
+        ttk.Checkbutton(rec, text="Include aircraft labels", variable=self.rec_labels).grid(row=6, column=0, sticky="w")
+        self.rec_scale_var, _, _, row_scale = self._scale_with_entry(rec, "Scale %", 100, 200, "int", self.cfg.recording.scale_percent)
+        row_scale.grid(row=7, column=0, columnspan=2, sticky="we", pady=(6,0))
+
+        rec.columnconfigure(0, weight=1)
 
         frm.columnconfigure(0, weight=1)
         frm.columnconfigure(1, weight=1)
@@ -1636,7 +1719,7 @@ class ControlGUI:
         def pick_live_dir():
             d = filedialog.askdirectory(title="Select Output Folder", initialdir=os.path.abspath(self.live_out_dir.get() or "."))
             if d:
-                self.live_out_dir.delete(0, tk.END); self.live_out_dir.insert(0, d)
+                self.live_out_dir.delete(0, tk.END); self.live_out_dir.insert(0, os.path.abspath(d))
         ttk.Button(frm, text="Browse…", command=pick_live_dir).grid(row=2, column=2, sticky="w", padx=6)
 
         self.fps_var, _, _, row3 = self._scale_with_entry(frm, "FPS", 10, 60, "int", self.cfg.recording.fps)
@@ -1650,13 +1733,12 @@ class ControlGUI:
         self.offline_out.insert(0, self.cfg.recording.offline_out_file)
         self.offline_out.grid(row=5, column=1, sticky="w")
         def pick_offline_out():
-            # choose file path; default .mp4 but can be any
             path = filedialog.asksaveasfilename(title="Select Offline Output File",
                                                 defaultextension=".mp4",
                                                 initialfile=os.path.basename(self.offline_out.get() or "render.mp4"),
                                                 filetypes=[("MP4 Video","*.mp4"),("All Files","*.*")])
             if path:
-                self.offline_out.delete(0, tk.END); self.offline_out.insert(0, path)
+                self.offline_out.delete(0, tk.END); self.offline_out.insert(0, os.path.abspath(path))
         ttk.Button(frm, text="Browse…", command=pick_offline_out).grid(row=5, column=2, sticky="w", padx=6)
 
         def do_offline_render():
@@ -1665,18 +1747,81 @@ class ControlGUI:
             if not _HAS_PYGAME:
                 messagebox.showerror("Missing Dependency", "pygame is required for offline rendering.")
                 return
+            if not self.cfg.recording.offline_out_file:
+                messagebox.showerror("Output Required", "Select an offline output file before rendering.")
+                return
+            out_dir = os.path.dirname(self.cfg.recording.offline_out_file) or "."
+            if not os.path.isdir(out_dir):
+                messagebox.showerror("Invalid Path", "Offline output directory does not exist.")
+                return
             save_config(self.cfg)
-            out = render_offline(self.cfg)
-            messagebox.showinfo("Offline Render Complete", f"Output written to:\n{out}")
+            try:
+                self.render_proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--offline-render"],
+                                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.render_status.set(f"Rendering… writing to {self.cfg.recording.offline_out_file}")
+                self.cancel_render_btn.state(["!disabled"])
+                self.reveal_render_btn.state(["disabled"])
+                self._poll_render_proc()
+            except Exception as e:
+                messagebox.showerror("Offline Render Failed", str(e))
+        self.render_proc = None
         self.offline_btn = ttk.Button(frm, text="Render Offline Video Now", style="Accent.TButton", command=do_offline_render)
         self.offline_btn.grid(row=6, column=0, columnspan=3, sticky="we", pady=(12,0))
 
+        progress = ttk.Frame(frm, style="Card.TFrame")
+        progress.grid(row=7, column=0, columnspan=3, sticky="we", pady=(6,0))
+        self.render_status = tk.StringVar(value="")
+        ttk.Label(progress, textvariable=self.render_status).pack(side="left")
+        self.cancel_render_btn = ttk.Button(progress, text="Cancel", command=self.cancel_render, state="disabled")
+        self.cancel_render_btn.pack(side="left", padx=6)
+        self.reveal_render_btn = ttk.Button(progress, text="Reveal in folder", command=self.reveal_render, state="disabled")
+        self.reveal_render_btn.pack(side="left", padx=6)
+
         # Info label if MP4 disabled
         if not _HAS_IMAGEIO:
-            ttk.Label(frm, text="Tip: install 'imageio' + 'imageio-ffmpeg' to enable MP4 output.", foreground="#9ca3af").grid(row=7, column=0, columnspan=3, sticky="w", pady=(6,0))
+            ttk.Label(frm, text="Tip: install 'imageio' + 'imageio-ffmpeg' to enable MP4 output.", foreground="#9ca3af").grid(row=8, column=0, columnspan=3, sticky="w", pady=(6,0))
 
         frm.columnconfigure(0, weight=1)
         frm.columnconfigure(1, weight=1)
+
+    def _poll_render_proc(self):
+        if not self.render_proc:
+            return
+        ret = self.render_proc.poll()
+        if ret is None:
+            self.root.after(400, self._poll_render_proc)
+        else:
+            out, err = self.render_proc.communicate()
+            if ret == 0:
+                self.render_status.set(f"Complete: {self.cfg.recording.offline_out_file}")
+                self.reveal_render_btn.state(["!disabled"])
+            else:
+                self.render_status.set("Render failed")
+                messagebox.showerror("Offline Render Failed", err.decode().strip() or "Unknown error")
+            self.cancel_render_btn.state(["disabled"])
+            self.render_proc = None
+
+    def cancel_render(self):
+        if self.render_proc and self.render_proc.poll() is None:
+            self.render_proc.terminate()
+            self.render_status.set("Render cancelled")
+            self.cancel_render_btn.state(["disabled"])
+            self.render_proc = None
+
+    def reveal_render(self):
+        path = self.cfg.recording.offline_out_file
+        if not path:
+            return
+        folder = os.path.dirname(path)
+        try:
+            if sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', folder])
+            elif os.name == 'nt':
+                subprocess.Popen(['explorer', folder])
+            else:
+                subprocess.Popen(['xdg-open', folder])
+        except Exception:
+            pass
 
     def build_start_tab(self, tab):
         frm = ttk.Frame(tab, style="Card.TFrame")
@@ -1745,12 +1890,23 @@ class ControlGUI:
         self.cfg.theme.ac_colors = AIRFRAME_COLORSETS.get(self.color_map.get(), AIRFRAME_COLORSETS["Neutral Grays"])
 
         # Recording
-        self.cfg.recording.record_live = bool(self.record_live.get())
-        self.cfg.recording.record_format = self.record_format.get()
-        self.cfg.recording.live_out_dir = self.live_out_dir.get().strip() or "captures"
-        self.cfg.recording.fps = int(self.fps_var.get())
-        self.cfg.recording.frames_per_period = int(self.fpp_var.get())
-        self.cfg.recording.offline_out_file = self.offline_out.get().strip() or "render.mp4"
+        rc = self.cfg.recording
+        rc.record_live = bool(self.record_live.get())
+        rc.record_format = self.record_format.get()
+        live_dir = self.live_out_dir.get().strip()
+        rc.live_out_dir = os.path.abspath(live_dir) if live_dir else ""
+        rc.fps = int(self.fps_var.get())
+        rc.frames_per_period = int(self.fpp_var.get())
+        offline = self.offline_out.get().strip()
+        rc.offline_out_file = os.path.abspath(offline) if offline else ""
+        rc.include_hud = bool(self.rec_hud.get())
+        rc.include_debug = bool(self.rec_debug.get())
+        rc.include_panels = bool(self.rec_panels.get())
+        rc.show_watermark = bool(self.rec_watermark.get())
+        rc.show_timestamp = bool(self.rec_timestamp.get())
+        rc.show_frame_index = bool(self.rec_frameidx.get())
+        rc.scale_percent = int(self.rec_scale_var.get())
+        rc.include_labels = bool(self.rec_labels.get())
 
         return True
 
@@ -1794,6 +1950,11 @@ class ControlGUI:
         if not _HAS_PYGAME:
             messagebox.showerror("Missing Dependency", "pygame is required to run the simulation.")
             return
+        if self.cfg.recording.record_live:
+            d = self.cfg.recording.live_out_dir
+            if not d or not os.path.isdir(d):
+                messagebox.showerror("Output Folder Required", "Select a valid folder for live recordings before starting.")
+                return
         save_config(self.cfg)
         self.root.destroy()
         exit_code, live_out = run_sim(self.cfg)

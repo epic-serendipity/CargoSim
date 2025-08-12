@@ -18,3 +18,10 @@ these values so offline frames match the on‑screen simulation.
 Presets supply core tokens and may specify a `default_airframe_colorset` for
 first‑run defaults. Switching presets does not modify the user's chosen
 airframe colors.
+
+## Recording paths and offline render
+
+- Live recording is disabled until the user selects an existing output folder.
+- Offline rendering requires an explicit file path; the render button spawns a
+  background process and shows progress with Cancel/Reveal buttons.
+- All saved paths are normalized to absolute form in the config file.
