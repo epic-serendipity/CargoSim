@@ -52,6 +52,8 @@ VIS_CAPS_DFLT = (6, 2, 4, 4)  # used for relative bar heights
 
 # ------------------------- Theme Presets & Color Maps -------------------------
 
+CURRENT_THEME_VERSION = 1
+
 def _hex(h):  # helper to clamp/normalize hex
     h = h.strip().lstrip("#")
     if len(h) == 3:
@@ -61,7 +63,7 @@ def _hex(h):  # helper to clamp/normalize hex
 THEME_PRESETS = {
     # name: dict fields for ThemeConfig
     "Classic Light": {
-        "menu_mode": "light",
+        "menu_theme": "light",
         "game_bg": _hex("f8fafc"),
         "game_fg": _hex("0f172a"),
         "game_muted": _hex("475569"),
@@ -72,9 +74,10 @@ THEME_PRESETS = {
         "bar_B": _hex("ea580c"),
         "bar_C": _hex("10b981"),
         "bar_D": _hex("ef4444"),
+        "default_airframe_colorset": "Neutral Grays",
     },
     "Classic Dark": {
-        "menu_mode": "dark",
+        "menu_theme": "dark",
         "game_bg": _hex("0f172a"),
         "game_fg": _hex("e5e7eb"),
         "game_muted": _hex("9ca3af"),
@@ -85,9 +88,10 @@ THEME_PRESETS = {
         "bar_B": _hex("f59e0b"),
         "bar_C": _hex("34d399"),
         "bar_D": _hex("f87171"),
+        "default_airframe_colorset": "Neutral Grays",
     },
     "Cyber": {
-        "menu_mode": "dark",
+        "menu_theme": "dark",
         "game_bg": _hex("0b1020"),
         "game_fg": _hex("e0f2fe"),
         "game_muted": _hex("7dd3fc"),
@@ -98,9 +102,10 @@ THEME_PRESETS = {
         "bar_B": _hex("f59e0b"),
         "bar_C": _hex("22c55e"),
         "bar_D": _hex("f97316"),
+        "default_airframe_colorset": "High Contrast",
     },
     "GitHub Light": {
-        "menu_mode": "light",
+        "menu_theme": "light",
         "game_bg": _hex("f6f8fa"),
         "game_fg": _hex("24292f"),
         "game_muted": _hex("57606a"),
@@ -111,9 +116,10 @@ THEME_PRESETS = {
         "bar_B": _hex("bf8700"),
         "bar_C": _hex("1a7f37"),
         "bar_D": _hex("cf222e"),
+        "default_airframe_colorset": "Blue / Orange",
     },
     "GitHub Dark": {
-        "menu_mode": "dark",
+        "menu_theme": "dark",
         "game_bg": _hex("0d1117"),
         "game_fg": _hex("c9d1d9"),
         "game_muted": _hex("8b949e"),
@@ -124,9 +130,10 @@ THEME_PRESETS = {
         "bar_B": _hex("d29922"),
         "bar_C": _hex("3fb950"),
         "bar_D": _hex("f85149"),
+        "default_airframe_colorset": "Blue / Orange",
     },
     "Night Ops": {
-        "menu_mode": "dark",
+        "menu_theme": "dark",
         "game_bg": _hex("0b0f14"),
         "game_fg": _hex("d1d5db"),
         "game_muted": _hex("9ca3af"),
@@ -137,9 +144,10 @@ THEME_PRESETS = {
         "bar_B": _hex("fbbf24"),
         "bar_C": _hex("22c55e"),
         "bar_D": _hex("f87171"),
+        "default_airframe_colorset": "Camo (olive / tan)",
     },
     "Solarized Light": {
-        "menu_mode": "light",
+        "menu_theme": "light",
         "game_bg": _hex("fdf6e3"),
         "game_fg": _hex("073642"),
         "game_muted": _hex("586e75"),
@@ -150,9 +158,10 @@ THEME_PRESETS = {
         "bar_B": _hex("b58900"),
         "bar_C": _hex("2aa198"),
         "bar_D": _hex("cb4b16"),
+        "default_airframe_colorset": "Green / Yellow",
     },
     "Solarized Dark": {
-        "menu_mode": "dark",
+        "menu_theme": "dark",
         "game_bg": _hex("002b36"),
         "game_fg": _hex("eee8d5"),
         "game_muted": _hex("93a1a1"),
@@ -163,9 +172,10 @@ THEME_PRESETS = {
         "bar_B": _hex("b58900"),
         "bar_C": _hex("2aa198"),
         "bar_D": _hex("cb4b16"),
+        "default_airframe_colorset": "Green / Yellow",
     },
     "Desert": {
-        "menu_mode": "light",
+        "menu_theme": "light",
         "game_bg": _hex("f5f0e6"),
         "game_fg": _hex("3f3a2e"),
         "game_muted": _hex("7a6e5a"),
@@ -176,9 +186,10 @@ THEME_PRESETS = {
         "bar_B": _hex("b08968"),
         "bar_C": _hex("a7c957"),
         "bar_D": _hex("e76f51"),
+        "default_airframe_colorset": "Desert (sand / brown)",
     },
     "Ocean": {
-        "menu_mode": "light",
+        "menu_theme": "light",
         "game_bg": _hex("e6f1f8"),
         "game_fg": _hex("0a2540"),
         "game_muted": _hex("55738a"),
@@ -189,6 +200,7 @@ THEME_PRESETS = {
         "bar_B": _hex("00acc1"),
         "bar_C": _hex("26a69a"),
         "bar_D": _hex("ef5350"),
+        "default_airframe_colorset": "Navy (navy / gold)",
     },
 }
 
@@ -205,6 +217,27 @@ AIRFRAME_COLORSETS = {
     "Mono Invert": {"C-130": "#f5f5f5", "C-27": "#262626"},
 }
 
+def apply_theme_preset(t: "ThemeConfig", name: str):
+    p = THEME_PRESETS.get(name, THEME_PRESETS["Classic Dark"])
+    t.preset = name
+    t.menu_theme = p["menu_theme"]
+    t.game_bg = p["game_bg"]
+    t.game_fg = p["game_fg"]
+    t.game_muted = p["game_muted"]
+    t.hub_color = p["hub_color"]
+    t.good_spoke = p["good_spoke"]
+    t.bad_spoke = p["bad_spoke"]
+    t.bar_A = p["bar_A"]
+    t.bar_B = p["bar_B"]
+    t.bar_C = p["bar_C"]
+    t.bar_D = p["bar_D"]
+    t.theme_version = CURRENT_THEME_VERSION
+    if t.ac_colorset is None:
+        cmap_name = p.get("default_airframe_colorset")
+        if cmap_name and cmap_name in AIRFRAME_COLORSETS:
+            t.ac_colorset = cmap_name
+            t.ac_colors = AIRFRAME_COLORSETS[cmap_name]
+
 # ------------------------- Config -------------------------
 @dataclass
 class ThemeConfig:
@@ -216,11 +249,13 @@ class ThemeConfig:
     hub_color: str = "#1e1e1e"
     good_spoke: str = "#3ccc78"
     bad_spoke: str = "#dc3c3c"
+    ac_colorset: Optional[str] = None
     ac_colors: Dict[str, str] = field(default_factory=lambda: {"C-130": "#dcdcdc", "C-27": "#b5b5b5"})
     bar_A: str = "#4682c8"
     bar_B: str = "#eba23c"
     bar_C: str = "#50b45a"
     bar_D: str = "#d25050"
+    theme_version: int = 1
 
     def to_json(self) -> dict:
         return {
@@ -233,10 +268,12 @@ class ThemeConfig:
             "good_spoke": self.good_spoke,
             "bad_spoke": self.bad_spoke,
             "ac_colors": self.ac_colors,
+            "ac_colorset": self.ac_colorset,
             "bar_A": self.bar_A,
             "bar_B": self.bar_B,
             "bar_C": self.bar_C,
             "bar_D": self.bar_D,
+            "theme_version": self.theme_version,
         }
 
     @staticmethod
@@ -251,10 +288,12 @@ class ThemeConfig:
         t.good_spoke = d.get("good_spoke", t.good_spoke)
         t.bad_spoke = d.get("bad_spoke", t.bad_spoke)
         t.ac_colors = d.get("ac_colors", t.ac_colors)
+        t.ac_colorset = d.get("ac_colorset", t.ac_colorset)
         t.bar_A = d.get("bar_A", t.bar_A)
         t.bar_B = d.get("bar_B", t.bar_B)
         t.bar_C = d.get("bar_C", t.bar_C)
         t.bar_D = d.get("bar_D", t.bar_D)
+        t.theme_version = int(d.get("theme_version", t.theme_version))
         return t
 
 @dataclass
@@ -360,10 +399,20 @@ def load_config() -> SimConfig:
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return SimConfig.from_json(data)
+            cfg = SimConfig.from_json(data)
+            if cfg.theme.theme_version < CURRENT_THEME_VERSION or cfg.theme.ac_colorset is None:
+                apply_theme_preset(cfg.theme, cfg.theme.preset)
+            else:
+                # ensure ac_colors matches selected set if known
+                if cfg.theme.ac_colorset in AIRFRAME_COLORSETS:
+                    cfg.theme.ac_colors = AIRFRAME_COLORSETS[cfg.theme.ac_colorset]
+                cfg.theme.theme_version = CURRENT_THEME_VERSION
+            return cfg
         except Exception:
             pass
-    return SimConfig()
+    cfg = SimConfig()
+    apply_theme_preset(cfg.theme, cfg.theme.preset)
+    return cfg
 
 def save_config(cfg: SimConfig):
     try:
@@ -800,6 +849,13 @@ class Renderer:
         self.ac_colors = {k: hex2rgb(v) for k,v in t.ac_colors.items()}
         self.bar_cols = [hex2rgb(t.bar_A), hex2rgb(t.bar_B), hex2rgb(t.bar_C), hex2rgb(t.bar_D)]
 
+        def blend(a, b, tt):
+            return tuple(int(a[i]*(1-tt) + b[i]*tt) for i in range(3))
+        self.panel_bg = blend(self.bg, self.hub_color, 0.25)
+        self.panel_btn = blend(self.bg, self.hub_color, 0.45)
+        self.panel_btn_fg = self.white
+        self.overlay_backdrop_rgba = (*self.bg, 160)
+
         self.font = pygame.font.SysFont("consolas", 18)
         self.bigfont = pygame.font.SysFont("consolas", 22, bold=True)
 
@@ -932,7 +988,7 @@ class Renderer:
         if not self.debug_overlay:
             return
         surf = pygame.Surface((int(self.width*0.45), int(self.height*0.35)), pygame.SRCALPHA)
-        surf.fill((0, 0, 0, 128))
+        surf.fill(self.overlay_backdrop_rgba)
         x0, y0 = 20, 60
         self.screen.blit(surf, (x0, y0))
 
@@ -950,8 +1006,8 @@ class Renderer:
         panel_w = 160
         left_rect = pygame.Rect(0, 0, panel_w, self.height)
         right_rect = pygame.Rect(self.width - panel_w, 0, panel_w, self.height)
-        pygame.draw.rect(self.screen, (20,20,24), left_rect)
-        pygame.draw.rect(self.screen, (20,20,24), right_rect)
+        pygame.draw.rect(self.screen, self.panel_bg, left_rect)
+        pygame.draw.rect(self.screen, self.panel_bg, right_rect)
 
         # Left: operational spokes
         ops = self.sim.ops_count()
@@ -959,9 +1015,9 @@ class Renderer:
         bar_h = int(self.height*0.25)
         bar_x = 24
         bar_y = 60
-        pygame.draw.rect(self.screen, (50,50,60), (bar_x, bar_y, 24, bar_h), border_radius=6)
+        pygame.draw.rect(self.screen, self.panel_btn, (bar_x, bar_y, 24, bar_h), border_radius=6)
         fill_h = int(bar_h * (ops / max_ops if max_ops else 1))
-        pygame.draw.rect(self.screen, (100,180,120), (bar_x, bar_y + (bar_h - fill_h), 24, fill_h), border_radius=6)
+        pygame.draw.rect(self.screen, self.good_spoke_col, (bar_x, bar_y + (bar_h - fill_h), 24, fill_h), border_radius=6)
         label = self.font.render(f"Operational: {ops}", True, self.white)
         self.screen.blit(label, (bar_x - 4, bar_y - 24))
 
@@ -976,7 +1032,7 @@ class Renderer:
             h = int((self.height*0.25) * (val / max_val if max_val else 1))
             x = bar_x + k*(barw+gap)
             y = bars_area_y + (self.height*0.25 - h)
-            pygame.draw.rect(self.screen, (60,60,70), (x, bars_area_y, barw, int(self.height*0.25)), border_radius=6)
+            pygame.draw.rect(self.screen, self.panel_btn, (x, bars_area_y, barw, int(self.height*0.25)), border_radius=6)
             pygame.draw.rect(self.screen, self.bar_cols[k], (x, y, barw, h), border_radius=6)
             lbl = self.font.render(["A","B","C","D"][k], True, self.white)
             self.screen.blit(lbl, (x+4 - lbl.get_width()//2 + 6, bars_area_y - 22))
@@ -991,9 +1047,9 @@ class Renderer:
         row_h = 24
         for i in range(self.sim.M):
             y = base_y + i*row_h
-            pygame.draw.rect(self.screen, (60,60,70), (self.width - panel_w + 18, y, panel_w - 36, 12), border_radius=6)
+            pygame.draw.rect(self.screen, self.panel_btn, (self.width - panel_w + 18, y, panel_w - 36, 12), border_radius=6)
             w = int((panel_w - 36) * (ops_counts[i] / max_ops_spoke))
-            pygame.draw.rect(self.screen, (140,180,220), (self.width - panel_w + 18, y, w, 12), border_radius=6)
+            pygame.draw.rect(self.screen, self.good_spoke_col, (self.width - panel_w + 18, y, w, 12), border_radius=6)
             lbl = self.font.render(f"S{i+1}", True, self.white)
             self.screen.blit(lbl, (self.width - panel_w + 18, y - 18))
 
@@ -1001,13 +1057,13 @@ class Renderer:
     def draw_pause_menu(self):
         # backdrop
         s = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-        s.fill((0,0,0,160))
+        s.fill(self.overlay_backdrop_rgba)
         self.screen.blit(s, (0,0))
         # box
         box_w, box_h = 420, 280
         bx = (self.width - box_w)//2
         by = (self.height - box_h)//2
-        pygame.draw.rect(self.screen, (24,26,32), (bx,by,box_w,box_h), border_radius=12)
+        pygame.draw.rect(self.screen, self.panel_bg, (bx,by,box_w,box_h), border_radius=12)
         title = self.bigfont.render("Paused", True, self.white)
         self.screen.blit(title, (bx + (box_w - title.get_width())//2, by + 16))
 
@@ -1020,8 +1076,8 @@ class Renderer:
         yy = by + 72
         for text, key in labels:
             rect = pygame.Rect(bx+40, yy, box_w-80, 44)
-            pygame.draw.rect(self.screen, (44,46,56), rect, border_radius=8)
-            t = self.font.render(text, True, self.white)
+            pygame.draw.rect(self.screen, self.panel_btn, rect, border_radius=8)
+            t = self.font.render(text, True, self.panel_btn_fg)
             self.screen.blit(t, (rect.x + (rect.w - t.get_width())//2, rect.y + (rect.h - t.get_height())//2))
             self._pm_rects[key] = rect
             yy += 56
@@ -1223,6 +1279,7 @@ def render_offline(cfg: SimConfig):
             self.panel_bg = blend(self.bg, self.hub_color, 0.25)
             self.panel_btn = blend(self.bg, self.hub_color, 0.45)
             self.panel_btn_fg = self.white
+            self.overlay_backdrop_rgba = (*self.bg, 160)
 
 
         def run(self): pass  # not used
@@ -1309,7 +1366,7 @@ class ControlGUI:
         self.build_start_tab(self.tab_start)
 
         # After tabs are built, apply dependency gating
-        self._apply_dependency_states()
+        self._update_dep_state()
 
     # ---- Style & Theme ----
     def _setup_style(self, initial_mode="dark"):
@@ -1324,11 +1381,11 @@ class ControlGUI:
         if mode == "light":
             bg = "#f3f4f6"; card_bg = "#ffffff"; fg = "#111827"; subfg = "#4b5563"
             accent = "#2563eb"; accent_hover = "#1d4ed8"
-            field_bg = "#f9fafb"
+            field_bg = "#f9fafb"; disabled_bg = "#e5e7eb"; disabled_fg = "#9ca3af"
         else:
             bg = "#0f172a"; card_bg = "#111827"; fg = "#e5e7eb"; subfg = "#9ca3af"
             accent = "#2563eb"; accent_hover = "#1d4ed8"
-            field_bg = "#0b1220"
+            field_bg = "#0b1220"; disabled_bg = "#1f2937"; disabled_fg = "#6b7280"
 
         self.root.configure(bg=bg)
         style.configure(".", background=bg, foreground=fg, fieldbackground=field_bg)
@@ -1337,17 +1394,30 @@ class ControlGUI:
         style.configure("TCheckbutton", background=card_bg, foreground=fg)
         style.configure("TEntry", fieldbackground=field_bg, foreground=fg, insertcolor=fg, padding=4, relief="flat")
         style.configure("TSpinbox", fieldbackground=field_bg, foreground=fg, arrowsize=14)
-        style.configure("TSeparator", background="#1f2937")
+        style.configure("TSeparator", background=subfg)
 
         style.configure("Accent.TButton", background=accent, foreground="white", padding=8, relief="flat", focusthickness=3)
-        style.map("Accent.TButton", background=[("active", "#1d4ed8")], relief=[("pressed","groove")])
+        style.map("Accent.TButton",
+                   background=[("active", accent_hover), ("disabled", disabled_bg)],
+                   foreground=[("disabled", disabled_fg)],
+                   relief=[("pressed","groove")])
 
-        style.configure("TButton", padding=6, relief="flat")
-        style.map("TButton", background=[("active", "#374151")], relief=[("pressed","groove")])
+        style.configure("TButton", padding=6, relief="flat", background=card_bg, foreground=fg)
+        style.map("TButton",
+                   background=[("active", subfg), ("disabled", disabled_bg)],
+                   foreground=[("disabled", disabled_fg)],
+                   relief=[("pressed","groove")])
+
+        style.configure("TMenubutton", padding=6, background=card_bg, foreground=fg)
+        style.map("TMenubutton",
+                   background=[("active", subfg), ("disabled", disabled_bg)],
+                   foreground=[("disabled", disabled_fg)])
 
         style.configure("Tabs.TNotebook", background=bg, borderwidth=0)
         style.configure("Tabs.TNotebook.Tab", padding=(16,8), background=field_bg, foreground=fg, borderwidth=0)
-        style.map("Tabs.TNotebook.Tab", background=[("selected", card_bg), ("active", field_bg)], foreground=[("selected", fg)])
+        style.map("Tabs.TNotebook.Tab",
+                   background=[("selected", card_bg), ("active", field_bg)],
+                   foreground=[("selected", fg)])
         style.configure("Horizontal.TScale", background=card_bg, troughcolor=field_bg)
 
     # ---- Helpers for "Scale + Entry" controls ----
@@ -1522,32 +1592,26 @@ class ControlGUI:
         self.theme_preset = tk.StringVar(value=self.cfg.theme.preset)
         presets = list(THEME_PRESETS.keys())
         def on_theme_change(choice):
-            # apply preset immediately
-            p = THEME_PRESETS.get(self.theme_preset.get(), THEME_PRESETS["Classic Dark"])
-            self.cfg.theme.preset = self.theme_preset.get()
-            self.cfg.theme.menu_theme = p["menu_mode"]
-            self.cfg.theme.game_bg = p["game_bg"]
-            self.cfg.theme.game_fg = p["game_fg"]
-            self.cfg.theme.game_muted = p["game_muted"]
-            self.cfg.theme.hub_color = p["hub_color"]
-            self.cfg.theme.good_spoke = p["good_spoke"]
-            self.cfg.theme.bad_spoke = p["bad_spoke"]
-            self.cfg.theme.bar_A = p["bar_A"]
-            self.cfg.theme.bar_B = p["bar_B"]
-            self.cfg.theme.bar_C = p["bar_C"]
-            self.cfg.theme.bar_D = p["bar_D"]
-            # reflect immediately on GUI theme
+            apply_theme_preset(self.cfg.theme, self.theme_preset.get())
+            # update color map if preset sets default and user had none
+            if self.cfg.theme.ac_colorset:
+                self.color_map.set(self.cfg.theme.ac_colorset)
             self._apply_menu_theme(ttk.Style(), self.cfg.theme.menu_theme)
+            self._update_dep_state()
+            save_config(self.cfg)
         ttk.OptionMenu(frm, self.theme_preset, self.cfg.theme.preset, *presets, command=lambda _: on_theme_change(None)).grid(row=0, column=1, sticky="w")
 
         ttk.Separator(frm).grid(row=1, column=0, columnspan=2, sticky="we", pady=8)
 
         ttk.Label(frm, text="Airframe Color Map").grid(row=2, column=0, sticky="w")
-        self.color_map = tk.StringVar(value="Neutral Grays")
+        self.color_map = tk.StringVar(value=self.cfg.theme.ac_colorset or "Neutral Grays")
         def on_colorset_change(*_):
-            cmap = AIRFRAME_COLORSETS.get(self.color_map.get(), AIRFRAME_COLORSETS["Neutral Grays"])
+            cmap_name = self.color_map.get()
+            cmap = AIRFRAME_COLORSETS.get(cmap_name, AIRFRAME_COLORSETS["Neutral Grays"])
+            self.cfg.theme.ac_colorset = cmap_name
             self.cfg.theme.ac_colors = cmap
-        ttk.OptionMenu(frm, self.color_map, "Neutral Grays", *AIRFRAME_COLORSETS.keys(), command=on_colorset_change).grid(row=2, column=1, sticky="w")
+            save_config(self.cfg)
+        ttk.OptionMenu(frm, self.color_map, self.color_map.get(), *AIRFRAME_COLORSETS.keys(), command=on_colorset_change).grid(row=2, column=1, sticky="w")
 
         frm.columnconfigure(1, weight=1)
 
@@ -1618,7 +1682,7 @@ class ControlGUI:
         frm = ttk.Frame(tab, style="Card.TFrame")
         frm.pack(fill="both", expand=True)
 
-        self.dep_msg = ttk.Label(frm, text="", foreground="#9ca3af")
+        self.dep_msg = ttk.Label(frm, text="", foreground=self.cfg.theme.game_muted)
         self.dep_msg.pack(anchor="w", pady=(0,8))
 
         btn_row = ttk.Frame(frm, style="Card.TFrame")
@@ -1690,18 +1754,34 @@ class ControlGUI:
 
         return True
 
-    def _apply_dependency_states(self):
-        # Grey out / message for missing deps
+    def _update_dep_state(self):
         msg = []
         if not _HAS_PYGAME:
             msg.append("pygame missing — simulation & offline render disabled")
-            self.start_btn.configure(state="disabled")
+            self.start_btn.state(["disabled"])
+            if hasattr(self, "offline_btn"):
+                self.offline_btn.state(["disabled"])
+        else:
+            self.start_btn.state(["!disabled"])
+            if hasattr(self, "offline_btn"):
+                self.offline_btn.state(["!disabled"])
         if not _HAS_IMAGEIO:
             msg.append("imageio/imageio-ffmpeg missing — MP4 assembly disabled")
-            # Adjust dropdown value & state
-            self.record_format.set("PNG frames")
-            self.record_format_menu.configure(state="disabled")
-        self.dep_msg.configure(text=("; ".join(msg) if msg else "All dependencies available."))
+            m = self.record_format_menu["menu"]
+            try:
+                m.entryconfig("MP4", state="disabled")
+            except Exception:
+                pass
+            if self.record_format.get() == "MP4":
+                self.record_format.set("PNG frames")
+        else:
+            m = self.record_format_menu["menu"]
+            try:
+                m.entryconfig("MP4", state="normal")
+            except Exception:
+                pass
+        self.dep_msg.configure(text=("; ".join(msg) if msg else "All dependencies available."),
+                                foreground=self.cfg.theme.game_muted)
 
     def on_save(self):
         if self._read_back_to_cfg():
@@ -1720,6 +1800,42 @@ class ControlGUI:
         if exit_code == "GUI":
             main()
 
+def theme_sweep(out_dir: str = "_theme_sweep"):
+    os.makedirs(out_dir, exist_ok=True)
+    for name in THEME_PRESETS.keys():
+        cfg = SimConfig()
+        apply_theme_preset(cfg.theme, name)
+        if cfg.theme.ac_colorset:
+            cfg.theme.ac_colors = AIRFRAME_COLORSETS[cfg.theme.ac_colorset]
+        cfg.periods = 2
+        cfg.recording.frames_per_period = 1
+        cfg.recording.record_format = "PNG frames"
+        slug = name.replace(" ", "_")
+        cfg.recording.offline_out_file = os.path.join(out_dir, f"{slug}.png")
+        render_offline(cfg)
+
+        def hex2rgb(h):
+            h = h.lstrip('#')
+            return tuple(int(h[i:i+2], 16) for i in (0,2,4))
+        def luminance(rgb):
+            def chan(c):
+                c /= 255
+                return c/12.92 if c <= 0.03928 else ((c+0.055)/1.055) ** 2.4
+            r,g,b = [chan(x) for x in rgb]
+            return 0.2126*r + 0.7152*g + 0.0722*b
+        fg = hex2rgb(cfg.theme.game_fg); bg = hex2rgb(cfg.theme.game_bg)
+        L1, L2 = luminance(fg), luminance(bg)
+        ratio = (max(L1,L2)+0.05)/(min(L1,L2)+0.05)
+        if ratio < 4.5:
+            print(f"Contrast warning for {name}: {ratio:.2f}")
+        bars = [hex2rgb(cfg.theme.bar_A), hex2rgb(cfg.theme.bar_B), hex2rgb(cfg.theme.bar_C), hex2rgb(cfg.theme.bar_D)]
+        for i in range(4):
+            for j in range(i+1,4):
+                diff = sum(abs(bars[i][k]-bars[j][k]) for k in range(3))
+                if diff < 40:
+                    print(f"Bar color similarity warning in {name}: {i} vs {j}")
+    print(f"Theme sweep output written to {out_dir}")
+
 # ------------------------- Entrypoints & CLI -------------------------
 
 def run_sim(cfg: SimConfig):
@@ -1735,19 +1851,6 @@ def main():
     tmp.destroy()
 
     cfg = load_config()
-    # ensure theme preset fields are coherent (apply if not yet applied)
-    preset = THEME_PRESETS.get(cfg.theme.preset, THEME_PRESETS["Classic Dark"])
-    cfg.theme.menu_theme = preset["menu_mode"]
-    cfg.theme.game_bg = preset["game_bg"]
-    cfg.theme.game_fg = preset["game_fg"]
-    cfg.theme.game_muted = preset["game_muted"]
-    cfg.theme.hub_color = preset["hub_color"]
-    cfg.theme.good_spoke = preset["good_spoke"]
-    cfg.theme.bad_spoke = preset["bad_spoke"]
-    cfg.theme.bar_A = preset["bar_A"]
-    cfg.theme.bar_B = preset["bar_B"]
-    cfg.theme.bar_C = preset["bar_C"]
-    cfg.theme.bar_D = preset["bar_D"]
 
     root = tk.Tk()
     ControlGUI(root, cfg)
@@ -1758,5 +1861,7 @@ if __name__ == "__main__":
         cfg = load_config()
         out = render_offline(cfg)
         print(out)
+    elif "--theme-sweep" in sys.argv:
+        theme_sweep()
     else:
         main()
