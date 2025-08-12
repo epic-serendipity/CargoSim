@@ -64,14 +64,14 @@ THEME_PRESETS = {
     # name: dict fields for ThemeConfig
     "Classic Light": {
         "menu_theme": "light",
-        "game_bg": _hex("f8fafc"),
+        "game_bg": _hex("f7f7fa"),
         "game_fg": _hex("0f172a"),
-        "game_muted": _hex("475569"),
+        "game_muted": _hex("64748b"),
         "hub_color": _hex("e5e7eb"),
         "good_spoke": _hex("16a34a"),
         "bad_spoke": _hex("dc2626"),
         "bar_A": _hex("2563eb"),
-        "bar_B": _hex("ea580c"),
+        "bar_B": _hex("f59e0b"),
         "bar_C": _hex("10b981"),
         "bar_D": _hex("ef4444"),
         "default_airframe_colorset": "Neutral Grays",
@@ -82,8 +82,8 @@ THEME_PRESETS = {
         "game_fg": _hex("e5e7eb"),
         "game_muted": _hex("9ca3af"),
         "hub_color": _hex("1f2937"),
-        "good_spoke": _hex("3fb950"),
-        "bad_spoke": _hex("f85149"),
+        "good_spoke": _hex("22c55e"),
+        "bad_spoke": _hex("ef4444"),
         "bar_A": _hex("60a5fa"),
         "bar_B": _hex("f59e0b"),
         "bar_C": _hex("34d399"),
@@ -92,15 +92,15 @@ THEME_PRESETS = {
     },
     "Cyber": {
         "menu_theme": "dark",
-        "game_bg": _hex("0b1020"),
+        "game_bg": _hex("080a1a"),
         "game_fg": _hex("e0f2fe"),
         "game_muted": _hex("7dd3fc"),
-        "hub_color": _hex("0e7490"),
+        "hub_color": _hex("0ea5e9"),
         "good_spoke": _hex("22d3ee"),
         "bad_spoke": _hex("f43f5e"),
         "bar_A": _hex("22d3ee"),
-        "bar_B": _hex("f59e0b"),
-        "bar_C": _hex("22c55e"),
+        "bar_B": _hex("a78bfa"),
+        "bar_C": _hex("06b6d4"),
         "bar_D": _hex("f97316"),
         "default_airframe_colorset": "High Contrast",
     },
@@ -176,12 +176,12 @@ THEME_PRESETS = {
     },
     "Desert": {
         "menu_theme": "light",
-        "game_bg": _hex("f5f0e6"),
+        "game_bg": _hex("f3ead7"),
         "game_fg": _hex("3f3a2e"),
         "game_muted": _hex("7a6e5a"),
         "hub_color": _hex("e5dcc9"),
-        "good_spoke": _hex("a3be8c"),
-        "bad_spoke": _hex("bf616a"),
+        "good_spoke": _hex("7cb342"),
+        "bad_spoke": _hex("bf360c"),
         "bar_A": _hex("d4a373"),
         "bar_B": _hex("b08968"),
         "bar_C": _hex("a7c957"),
@@ -372,6 +372,8 @@ class SimConfig:
     unlimited_storage: bool = True
     debug_mode: bool = False
     stats_mode: str = "total"         # "total" | "average"
+    right_panel_view: str = "ops_total_number"  # "ops_total_number"|"ops_total_sparkline"|"per_spoke"
+    orient_aircraft: bool = True
     theme: ThemeConfig = field(default_factory=ThemeConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
 
@@ -389,6 +391,8 @@ class SimConfig:
             "unlimited_storage": self.unlimited_storage,
             "debug_mode": self.debug_mode,
             "stats_mode": self.stats_mode,
+            "right_panel_view": self.right_panel_view,
+            "orient_aircraft": self.orient_aircraft,
             "theme": self.theme.to_json(),
             "recording": self.recording.to_json(),
         }
@@ -414,6 +418,8 @@ class SimConfig:
         cfg.unlimited_storage = bool(d.get("unlimited_storage", cfg.unlimited_storage))
         cfg.debug_mode = bool(d.get("debug_mode", cfg.debug_mode))
         cfg.stats_mode = d.get("stats_mode", cfg.stats_mode)
+        cfg.right_panel_view = d.get("right_panel_view", cfg.right_panel_view)
+        cfg.orient_aircraft = bool(d.get("orient_aircraft", cfg.orient_aircraft))
         cfg.theme = ThemeConfig.from_json(d.get("theme", {}))
         cfg.recording = RecordingConfig.from_json(d.get("recording", {}))
         return cfg
@@ -550,6 +556,7 @@ class LogisticsSim:
 
         # Stats
         self.ops_by_spoke = [0]*self.M  # counts of OFFLOAD occurrences per spoke
+        self.ops_total_history = [0]
 
         # History for rewind
         self.history: List[dict] = []
@@ -624,6 +631,7 @@ class LogisticsSim:
             "fleet": copy.deepcopy(self.fleet),
             "actions_log": copy.deepcopy(self.actions_log),
             "ops_by_spoke": self.ops_by_spoke[:],
+            "ops_total_history": self.ops_total_history[:],
         }
 
     def restore(self, snap: dict):
@@ -637,6 +645,7 @@ class LogisticsSim:
         self.fleet = copy.deepcopy(snap["fleet"])
         self.actions_log = copy.deepcopy(snap["actions_log"])
         self.ops_by_spoke = snap.get("ops_by_spoke", [0]*self.M)[:]
+        self.ops_total_history = snap.get("ops_total_history", [0])[:]
 
     def push_snapshot(self):
         self.history.append(self.snapshot())
@@ -793,6 +802,7 @@ class LogisticsSim:
         self.actions_log.append(actions_this_period)
         self.t += 1
         self.half = "AM" if self.t % 2 == 0 else "PM"
+        self.ops_total_history.append(sum(self.ops_by_spoke))
 
         self.push_snapshot()
 
@@ -881,8 +891,8 @@ class Renderer:
 
         def blend(a, b, tt):
             return tuple(int(a[i]*(1-tt) + b[i]*tt) for i in range(3))
-        self.panel_bg = blend(self.bg, self.hub_color, 0.25)
-        self.panel_btn = blend(self.bg, self.hub_color, 0.45)
+        self.panel_bg = blend(self.bg, self.hub_color, 0.3)
+        self.panel_btn = blend(self.bg, self.hub_color, 0.5)
         self.panel_btn_fg = self.white
         self.overlay_backdrop_rgba = (*self.bg, 160)
 
@@ -909,6 +919,7 @@ class Renderer:
 
         # Pause menu button rects
         self._pm_rects = {}
+        self._last_heading_by_ac: Dict[str, float] = {}
 
     def _compute_layout(self):
         self.cx = self.width // 2
@@ -988,31 +999,40 @@ class Renderer:
         for ac in self.sim.fleet:
             segs = moves_by_ac.get(ac.name, [])
             col = self.ac_colors.get(ac.typ, self.white)
+            angle = self._last_heading_by_ac.get(ac.name, -math.pi/2)
             if not segs:
                 pos = (self.cx, self.cy) if ac.location == "HUB" else self.spoke_pos[int(ac.location[1:])-1]
-                self.draw_triangle(pos, ac.typ, ac.name, col)
             else:
                 if alpha <= 0.5 and len(segs) >= 1:
                     s = segs[0]
                     a = (alpha / 0.5)
                     p0 = node_xy(s[0]); p1 = node_xy(s[1])
                     pos = (p0[0] + (p1[0]-p0[0])*a, p0[1] + (p1[1]-p0[1])*a)
-                    self.draw_triangle(pos, ac.typ, ac.name, col)
+                    angle = math.atan2(p1[1]-p0[1], p1[0]-p0[0])
                 elif alpha > 0.5 and len(segs) >= 2:
                     s = segs[1]
                     a = (alpha - 0.5) / 0.5
                     p0 = node_xy(s[0]); p1 = node_xy(s[1])
                     pos = (p0[0] + (p1[0]-p0[0])*a, p0[1] + (p1[1]-p0[1])*a)
-                    self.draw_triangle(pos, ac.typ, ac.name, col)
+                    angle = math.atan2(p1[1]-p0[1], p1[0]-p0[0])
                 else:
                     last = segs[-1]
-                    pos = node_xy(last[1])
-                    self.draw_triangle(pos, ac.typ, ac.name, col)
+                    p0 = node_xy(last[0]); p1 = node_xy(last[1])
+                    pos = p1
+                    angle = math.atan2(p1[1]-p0[1], p1[0]-p0[0])
+            self._last_heading_by_ac[ac.name] = angle
+            self.draw_triangle(pos, ac.typ, ac.name, col, angle)
 
-    def draw_triangle(self, pos, typ, name, color):
+    def draw_triangle(self, pos, typ, name, color, angle: float):
         x, y = int(pos[0]), int(pos[1])
         size = 14 if typ == "C-130" else 10
-        pts = [(x, y - size), (x - size//2, y + size//2), (x + size//2, y + size//2)]
+        base = [(0, -size), (-size//2, size//2), (size//2, size//2)]
+        if self.sim.cfg.orient_aircraft:
+            rot = angle + math.pi/2
+        else:
+            rot = 0.0
+        c = math.cos(rot); s = math.sin(rot)
+        pts = [(int(x + px*c - py*s), int(y + px*s + py*c)) for px, py in base]
         pygame.draw.polygon(self.screen, color, pts)
         show_lbl = self.sim.cfg.show_aircraft_labels or (self.recorder.live and self.sim.cfg.recording.include_labels)
         if show_lbl:
@@ -1094,18 +1114,46 @@ class Renderer:
             vtxt = self.font.render(val_str, True, self.grey)
             self.screen.blit(vtxt, (x - vtxt.get_width()//2 + 12, y - 18))
 
-        # Right: per-spoke ops bars
-        ops_counts = self.sim.ops_by_spoke
-        max_ops_spoke = max(1, max(ops_counts) if ops_counts else 1)
+        # Right panel modes
+        mode = self.sim.cfg.right_panel_view
+        rx = self.width - panel_w
         base_y = 60
-        row_h = 24
-        for i in range(self.sim.M):
-            y = base_y + i*row_h
-            pygame.draw.rect(self.screen, self.panel_btn, (self.width - panel_w + 18, y, panel_w - 36, 12), border_radius=6)
-            w = int((panel_w - 36) * (ops_counts[i] / max_ops_spoke))
-            pygame.draw.rect(self.screen, self.good_spoke_col, (self.width - panel_w + 18, y, w, 12), border_radius=6)
-            lbl = self.font.render(f"S{i+1}", True, self.white)
-            self.screen.blit(lbl, (self.width - panel_w + 18, y - 18))
+        if mode == "ops_total_number":
+            total = self.sim.ops_total_history[-1] if self.sim.ops_total_history else 0
+            title = self.font.render("Total Ops", True, self.white)
+            self.screen.blit(title, (rx + (panel_w - title.get_width())//2, base_y))
+            num = self.bigfont.render(str(total), True, self.white)
+            self.screen.blit(num, (rx + (panel_w - num.get_width())//2, base_y + 40))
+        elif mode == "ops_total_sparkline":
+            hist = self.sim.ops_total_history
+            rect = pygame.Rect(rx + pad, base_y, panel_w - 2*pad, 120)
+            pygame.draw.rect(self.screen, self.panel_bg, rect, border_radius=6)
+            N = min(rect.width, len(hist))
+            if N >= 2:
+                tail = hist[-N:]
+                max_val = max(tail)
+                if max_val <= 0:
+                    max_val = 1
+                step = rect.width / (N-1)
+                pts = []
+                for i, val in enumerate(tail):
+                    x = rect.left + i*step
+                    y = rect.bottom - (val/max_val)*rect.height
+                    pts.append((x, y))
+                pygame.draw.lines(self.screen, self.white, False, pts, 2)
+            lbl = self.font.render(f"Total Ops: {hist[-1] if hist else 0}", True, self.white)
+            self.screen.blit(lbl, (rect.x, rect.y - 24))
+        else:
+            ops_counts = self.sim.ops_by_spoke
+            max_ops_spoke = max(1, max(ops_counts) if ops_counts else 1)
+            row_h = 24
+            for i in range(self.sim.M):
+                y = base_y + i*row_h
+                pygame.draw.rect(self.screen, self.panel_btn, (rx + pad, y, panel_w - 2*pad, 12), border_radius=6)
+                w = int((panel_w - 2*pad) * (ops_counts[i] / max_ops_spoke))
+                pygame.draw.rect(self.screen, self.good_spoke_col, (rx + pad, y, w, 12), border_radius=6)
+                lbl = self.font.render(f"S{i+1}", True, self.white)
+                self.screen.blit(lbl, (rx + pad, y - 18))
 
     # --- Pause Menu ---
     def draw_pause_menu(self):
@@ -1337,11 +1385,12 @@ def render_offline(cfg: SimConfig):
             # derive panel colors from theme so pause/menu visuals stay on-brand
             def blend(a, b, t):
                 return tuple(int(a[i]*(1-t) + b[i]*t) for i in range(3))
-            self.panel_bg = blend(self.bg, self.hub_color, 0.25)
-            self.panel_btn = blend(self.bg, self.hub_color, 0.45)
+            self.panel_bg = blend(self.bg, self.hub_color, 0.3)
+            self.panel_btn = blend(self.bg, self.hub_color, 0.5)
             self.panel_btn_fg = self.white
             self.overlay_backdrop_rgba = (*self.bg, 160)
             self.recorder = Recorder(live=False, out_dir="", fps=0, fmt="PNG frames")
+            self._last_heading_by_ac = {}
 
         def run(self): pass  # not used
 
@@ -1439,14 +1488,25 @@ class ControlGUI:
         self._apply_menu_theme(style, initial_mode)
 
     def _apply_menu_theme(self, style: ttk.Style, mode: str):
-        if mode == "light":
-            bg = "#f3f4f6"; card_bg = "#ffffff"; fg = "#111827"; subfg = "#4b5563"
-            accent = "#2563eb"; accent_hover = "#1d4ed8"
-            field_bg = "#f9fafb"; disabled_bg = "#e5e7eb"; disabled_fg = "#9ca3af"
-        else:
-            bg = "#0f172a"; card_bg = "#111827"; fg = "#e5e7eb"; subfg = "#9ca3af"
-            accent = "#2563eb"; accent_hover = "#1d4ed8"
-            field_bg = "#0b1220"; disabled_bg = "#1f2937"; disabled_fg = "#6b7280"
+        t = self.cfg.theme
+        def hex2rgb(h):
+            h = h.lstrip("#")
+            return tuple(int(h[i:i+2], 16) for i in (0,2,4))
+        def rgb2hex(rgb):
+            return "#%02x%02x%02x" % rgb
+        def blend_hex(h1, h2, tt):
+            a = hex2rgb(h1); b = hex2rgb(h2)
+            c = tuple(int(a[i]*(1-tt) + b[i]*tt) for i in range(3))
+            return rgb2hex(c)
+        bg = t.game_bg
+        card_bg = blend_hex(t.game_bg, t.hub_color, 0.3)
+        fg = t.game_fg
+        subfg = t.game_muted
+        accent = t.bar_A
+        accent_hover = blend_hex(accent, "#ffffff", 0.15)
+        field_bg = blend_hex(t.game_bg, t.hub_color, 0.2)
+        disabled_bg = blend_hex(t.game_bg, t.hub_color, 0.5)
+        disabled_fg = t.game_muted
 
         self.root.configure(bg=bg)
         style.configure(".", background=bg, foreground=fg, fieldbackground=field_bg)
@@ -1457,7 +1517,7 @@ class ControlGUI:
         style.configure("TSpinbox", fieldbackground=field_bg, foreground=fg, arrowsize=14)
         style.configure("TSeparator", background=subfg)
 
-        style.configure("Accent.TButton", background=accent, foreground="white", padding=8, relief="flat", focusthickness=3)
+        style.configure("Accent.TButton", background=accent, foreground="#ffffff", padding=8, relief="flat", focusthickness=3)
         style.map("Accent.TButton",
                    background=[("active", accent_hover), ("disabled", disabled_bg)],
                    foreground=[("disabled", disabled_fg)],
@@ -1641,10 +1701,20 @@ class ControlGUI:
         ttk.Label(frm, text="Stats Mode").grid(row=3, column=0, sticky="w", pady=(6,0))
         self.stats_mode = tk.StringVar(value=self.cfg.stats_mode)
         ttk.OptionMenu(frm, self.stats_mode, self.cfg.stats_mode, "total", "average").grid(row=3, column=1, sticky="w")
-        ttk.Separator(frm).grid(row=4, column=0, columnspan=2, sticky="we", pady=8)
+
+        ttk.Label(frm, text="Right Panel View").grid(row=4, column=0, sticky="w", pady=(6,0))
+        self.right_panel_view = tk.StringVar(value=self.cfg.right_panel_view)
+        ttk.OptionMenu(frm, self.right_panel_view, self.cfg.right_panel_view,
+                       "ops_total_number", "ops_total_sparkline", "per_spoke").grid(row=4, column=1, sticky="w")
+
+        ttk.Label(frm, text="Orient Aircraft Toward Destination").grid(row=5, column=0, sticky="w", pady=(6,0))
+        self.orient_ac = tk.BooleanVar(value=self.cfg.orient_aircraft)
+        ttk.Checkbutton(frm, variable=self.orient_ac).grid(row=5, column=1, sticky="w")
+
+        ttk.Separator(frm).grid(row=6, column=0, columnspan=2, sticky="we", pady=8)
 
         rec = ttk.LabelFrame(frm, text="Recording Overlays")
-        rec.grid(row=5, column=0, columnspan=2, sticky="we")
+        rec.grid(row=7, column=0, columnspan=2, sticky="we")
         self.rec_hud = tk.BooleanVar(value=self.cfg.recording.include_hud)
         ttk.Checkbutton(rec, text="Include HUD in recording", variable=self.rec_hud).grid(row=0, column=0, sticky="w")
         self.rec_debug = tk.BooleanVar(value=self.cfg.recording.include_debug)
@@ -1883,6 +1953,8 @@ class ControlGUI:
         self.cfg.show_aircraft_labels = bool(self.show_aircraft_labels.get())
         self.cfg.debug_mode = bool(self.debug_mode.get())
         self.cfg.stats_mode = self.stats_mode.get()
+        self.cfg.right_panel_view = self.right_panel_view.get()
+        self.cfg.orient_aircraft = bool(self.orient_ac.get())
 
         # Theme preset already applied on change; persist
         self.cfg.theme.preset = self.theme_preset.get()

@@ -20,9 +20,21 @@ refuse to start until these paths are set. Live sessions write PNG frames or
 `session.mp4` (if `imageio` + `imageio-ffmpeg` are installed). Offline renders
 now run in a background process with a progress strip and a "Cancel" button.
 
-The **Visualization** tab includes a *Recording Overlays* section controlling
-what appears in live recordings: HUD, debug overlay, fullscreen panels, REC
-watermark, timestamps, frame indices, scale percentage and aircraft labels.
+Right Panel Views
+-----------------
+The fullscreen right panel defaults to a large **Total Ops** number. Switch
+between the number, a rolling sparkline or legacy per-spoke bars via the
+*Right Panel View* menu on the **Visualization** tab.
+
+Aircraft Heading
+----------------
+Enable *Orient Aircraft Toward Destination* on the **Visualization** tab to
+rotate aircraft icons toward their current destination. Disable it to keep all
+triangles upright.
+
+Below this are *Recording Overlays* controls for what appears in live
+recordings: HUD, debug overlay, fullscreen panels, REC watermark, timestamps,
+frame indices, scale percentage and aircraft labels.
 
 Other controls:
 - Sliders now have digital readouts (Entry fields) — type values directly or drag the slider.
@@ -41,5 +53,5 @@ Visualizer keys:
 Notes:
 - The ops counter is uncapped now.
 - HOME/END jumps removed.
-- In fullscreen, the left panel shows operational spokes and supply totals/averages; the right panel shows per‑spoke ops counts (number of OFFLOADs serviced at each spoke).
+- In fullscreen, the left panel shows operational spokes and supply totals/averages. The right panel can show a running Total Ops number, a Total Ops sparkline, or per‑spoke ops counts.
 - If MP4 assembly isn't available (no imageio), you'll still get PNG frames you can stitch with another tool.
