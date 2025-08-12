@@ -1,11 +1,10 @@
 # Agent Notes
 
 ## Adding a theme preset
-- Define `menu_theme`, `game_bg`, `game_fg`, `game_muted`, `hub_color`,
-  `good_spoke`, `bad_spoke`, `bar_A`, `bar_B`, `bar_C`, `bar_D`.
-- Optionally include `default_airframe_colorset`; never set `ac_colors` directly.
-- Ensure `game_fg` vs `game_bg` contrast ≥ 4.5:1.
-- Bar colors A–D must be visually distinct.
-- Do not override a user's chosen airframe color map when applying presets.
+- Provide all core tokens: `menu_theme`, `game_bg`, `game_fg`, `game_muted`,
+  `hub_color`, `good_spoke`, `bad_spoke`, `bar_A`, `bar_B`, `bar_C`, `bar_D`.
+- Ensure contrast between `game_fg` and `game_bg` is ≥ 4.5:1 for HUD text.
+- Bars A/B/C/D must be perceptually distinct.
+- Never override a user's selected airframe color map (`ac_colors`).
 - Renderer derives `panel_bg`, `panel_btn`, `panel_btn_fg` and
   `overlay_backdrop_rgba` from `game_bg` + `hub_color`; avoid hardcoded greys.

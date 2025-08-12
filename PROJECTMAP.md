@@ -19,6 +19,16 @@ Presets supply core tokens and may specify a `default_airframe_colorset` for
 first‑run defaults. Switching presets does not modify the user's chosen
 airframe colors.
 
+## Visualization
+
+- Right-side fullscreen panel modes:
+  - `ops_total_number` (default) shows a large running total of OFFLOAD ops.
+  - `ops_total_sparkline` plots a sparkline of recent totals.
+  - `per_spoke` shows legacy per-spoke bars.
+- Aircraft glyphs can optionally rotate toward their current destination when
+  `orient_aircraft` is enabled. Both interactive and headless renderers share
+  this behavior.
+
 ## Recording paths and offline render
 
 - Live recording is disabled until the user selects an existing output folder.
