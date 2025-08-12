@@ -7,3 +7,5 @@
 - Ensure `game_fg` vs `game_bg` contrast ≥ 4.5:1.
 - Bar colors A–D must be visually distinct.
 - Do not override a user's chosen airframe color map when applying presets.
+- Renderer derives `panel_bg`, `panel_btn`, `panel_btn_fg` and
+  `overlay_backdrop_rgba` from `game_bg` + `hub_color`; avoid hardcoded greys.

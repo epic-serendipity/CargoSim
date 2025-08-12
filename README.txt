@@ -5,22 +5,27 @@ CargoSim — Control GUI + Visualizer (Themed, Recording, Offline Render)
 Run:
     python cargo_sim_with_gui.py
 
-Themes
-------
-The **Theme** tab lets you choose from ten presets (Classic Light/Dark, Cyber,
-GitHub Light/Dark, Night Ops, Solarized Light/Dark, Desert, Ocean). Presets
-apply consistently to the Tk control panel, the Pygame simulation, pause menu
-and fullscreen overlays. Selecting a preset restyles the control panel
-immediately; the next simulation you launch will use the same palette. Aircraft
-colors are controlled separately via the *Airframe Color Map* menu and are not
-overwritten when switching presets.
+Themes and Recording
+--------------------
+The **Theme** tab offers ten presets (Classic Light/Dark, Cyber, GitHub
+Light/Dark, Night Ops, Solarized Light/Dark, Desert, Ocean). Presets restyle
+the Tk control panel, Pygame scene, pause menu and fullscreen side panels using
+named tokens rather than hardcoded colors. Aircraft colors are chosen
+independently via the *Airframe Color Map* menu and are never overridden by a
+theme.
 
-New controls:
+Recording requires explicit destinations. The **Recording** tab lets you select
+a folder for live captures and a file path for offline renders; recording will
+refuse to start until these paths are set. Live sessions write PNG frames or
+`session.mp4` (if `imageio` + `imageio-ffmpeg` are installed). Offline renders
+now run in a background process with a progress strip and a "Cancel" button.
+
+The **Visualization** tab includes a *Recording Overlays* section controlling
+what appears in live recordings: HUD, debug overlay, fullscreen panels, REC
+watermark, timestamps, frame indices, scale percentage and aircraft labels.
+
+Other controls:
 - Sliders now have digital readouts (Entry fields) — type values directly or drag the slider.
-- Theme tab: pick a light/dark menu theme, set game colors (BG, text, hub, spoke good/bad), aircraft colors per type, and supply bar colors.
-- Recording tab: 
-  * Record Live Session (frames to a folder; if imageio is available and you choose MP4, a session.mp4 is assembled after exit).
-  * Offline render: creates a video WITHOUT running the interactive sim, using frames_per_period × periods at your chosen FPS.
 - Visualization tab: Stats Mode = total or average for the fullscreen left panel bars.
 
 Visualizer keys:
