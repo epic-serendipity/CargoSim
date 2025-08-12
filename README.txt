@@ -5,6 +5,16 @@ CargoSim — Control GUI + Visualizer (Themed, Recording, Offline Render)
 Run:
     python cargo_sim_with_gui.py
 
+Themes
+------
+The **Theme** tab lets you choose from ten presets (Classic Light/Dark, Cyber,
+GitHub Light/Dark, Night Ops, Solarized Light/Dark, Desert, Ocean). Presets
+apply consistently to the Tk control panel, the Pygame simulation, pause menu
+and fullscreen overlays. Selecting a preset restyles the control panel
+immediately; the next simulation you launch will use the same palette. Aircraft
+colors are controlled separately via the *Airframe Color Map* menu and are not
+overwritten when switching presets.
+
 New controls:
 - Sliders now have digital readouts (Entry fields) — type values directly or drag the slider.
 - Theme tab: pick a light/dark menu theme, set game colors (BG, text, hub, spoke good/bad), aircraft colors per type, and supply bar colors.
