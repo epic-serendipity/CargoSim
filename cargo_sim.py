@@ -6,8 +6,9 @@ import copy
 import time
 import subprocess
 import threading
+import shutil
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Literal
 from types import SimpleNamespace
 
 # --- Tk first (always available on Win/macOS, may require apt on Linux) ---
@@ -24,20 +25,22 @@ except Exception:
 _HAS_IMAGEIO = True
 try:
     import imageio.v2 as imageio  # optional
-    try:
-        # imageio-ffmpeg is optional but recommended for local MP4
-        import imageio_ffmpeg  # noqa: F401
-        _HAS_IMAGEIO = True
-    except Exception:
-        # we still let imageio exist (will still write PNGs); MP4 assembly may fail
-        pass
 except Exception:
     _HAS_IMAGEIO = False
     imageio = None  # type: ignore
 
+def _mp4_available() -> tuple[bool, str]:
+    if not _HAS_IMAGEIO:
+        return False, "imageio not installed"
+    try:
+        import imageio_ffmpeg  # noqa: F401
+        return True, ""
+    except Exception as e:
+        return False, f"{e.__class__.__name__}: {e}"
+
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_config.json")
 DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_debug.log")
-CONFIG_VERSION = 5
+CONFIG_VERSION = 6
 
 # ------------------------- Defaults & Model Parameters -------------------------
 
@@ -262,6 +265,7 @@ class RecordingConfig:
     record_async_writer: bool = True
     record_max_queue: int = 64
     record_skip_on_backpressure: bool = True
+    offline_format: str = "mp4"
     offline_output_path: str = ""
     offline_progress_poll_ms: int = 400
     # legacy / common options
@@ -284,6 +288,7 @@ class RecordingConfig:
             "record_async_writer": self.record_async_writer,
             "record_max_queue": self.record_max_queue,
             "record_skip_on_backpressure": self.record_skip_on_backpressure,
+            "offline_format": self.offline_format,
             "offline_output_path": self.offline_output_path,
             "offline_progress_poll_ms": self.offline_progress_poll_ms,
             "fps": self.fps,
@@ -305,7 +310,9 @@ class RecordingConfig:
         r.record_live_format = d.get("record_live_format", d.get("record_format", r.record_live_format))
         live_dir = d.get("record_live_folder", d.get("live_out_dir", r.record_live_folder))
         r.record_live_folder = os.path.abspath(live_dir) if live_dir else ""
+        r.offline_format = d.get("offline_format", r.offline_format)
         off = d.get("offline_output_path", d.get("offline_out_file", r.offline_output_path))
+        off = os.path.expanduser(off) if off else ""
         r.offline_output_path = os.path.abspath(off) if off else ""
         r.record_async_writer = bool(d.get("record_async_writer", r.record_async_writer))
         r.record_max_queue = int(d.get("record_max_queue", r.record_max_queue))
@@ -599,10 +606,11 @@ def check_and_offer_installs(startup_root: tk.Tk):
             messagebox.showwarning("Simulation Disabled", "Without pygame, the simulation and offline render are disabled.")
 
     # Optional: imageio & imageio-ffmpeg
-    if not _HAS_IMAGEIO:
+    mp4_ok, _ = _mp4_available()
+    if not mp4_ok:
         if messagebox.askyesno("Optional Feature: MP4",
-                               "Optional dependency 'imageio' (and imageio-ffmpeg) not installed.\n"
-                               "Install to enable MP4 assembly for recordings?\n"
+                               "MP4 requires 'imageio' and 'imageio-ffmpeg'.\n"
+                               "Install the 'video' extra now?\n"
                                "You can still export PNG frames without it."):
             ok = _pip_install(["imageio", "imageio-ffmpeg"])
             if ok:
@@ -958,38 +966,124 @@ class LogisticsSim:
 # ------------------------- Recording Helpers -------------------------
 
 class Recorder:
-    def __init__(self, cfg: RecordingConfig, period_seconds: float):
-        self.cfg = cfg
-        self.live = cfg.record_live_enabled
-        self.period_seconds = period_seconds
+    def __init__(
+        self,
+        *,
+        mode: Literal["live", "offline"],
+        folder: Optional[str] = None,
+        file_path: Optional[str] = None,
+        fps: int,
+        fmt: str,
+        async_writer: bool = False,
+        max_queue: int = 64,
+        drop_on_backpressure: bool = True,
+    ):
+        fmt = fmt.lower().strip()
+        if fmt not in ("mp4", "png"):
+            raise ValueError("fmt must be 'mp4' or 'png'")
+        if fmt == "mp4":
+            ok, why = _mp4_available()
+            if not ok:
+                raise RuntimeError(
+                    "MP4 recording requires imageio-ffmpeg. Install the 'video' extra or switch to PNG frames."
+                    + (f" Details: {why}" if why else "")
+                )
+
+        self.mode = mode
+        self.live = (mode == "live")
+        self.fps = fps
+        self.fmt = fmt
         self.frame_idx = 0
         self.frames_dropped = 0
         self.queue: Optional["queue.Queue"] = None
         self.thread: Optional[threading.Thread] = None
         self.writer = None
         self.out_path: Optional[str] = None
-        if not self.live:
-            return
-        os.makedirs(cfg.record_live_folder, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        if cfg.record_live_format.lower() == "mp4" and _HAS_IMAGEIO:
-            self.out_path = os.path.join(cfg.record_live_folder, f"session_{ts}.mp4")
-            if cfg.record_async_writer:
-                import queue
-                self.queue = queue.Queue(maxsize=cfg.record_max_queue)
-                self.thread = threading.Thread(target=self._worker_mp4, daemon=True)
-                self.thread.start()
+        self.drop_on_backpressure = drop_on_backpressure
+
+        if self.live:
+            if not folder:
+                self.live = False
+                return
+            os.makedirs(folder, exist_ok=True)
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            if fmt == "mp4":
+                self.out_path = os.path.join(folder, f"session_{ts}.mp4")
+                if async_writer:
+                    import queue
+                    self.queue = queue.Queue(maxsize=max_queue)
+                    self.thread = threading.Thread(target=self._worker_mp4, daemon=True)
+                    self.thread.start()
+                else:
+                    self.writer = imageio.get_writer(
+                        self.out_path,
+                        format="FFMPEG",
+                        fps=fps,
+                        codec="libx264",
+                        quality=8,
+                        macro_block_size=None,
+                    )  # type: ignore
             else:
-                self.writer = imageio.get_writer(self.out_path, fps=cfg.fps, codec="libx264", quality=8)  # type: ignore
+                self.frame_dir = os.path.join(folder, "frames", f"session_{ts}")
+                os.makedirs(self.frame_dir, exist_ok=True)
+                self.out_path = self.frame_dir
+                if async_writer:
+                    import queue
+                    self.queue = queue.Queue(maxsize=max_queue)
+                    self.thread = threading.Thread(target=self._worker_png, daemon=True)
+                    self.thread.start()
         else:
-            self.frame_dir = os.path.join(cfg.record_live_folder, "frames", f"session_{ts}")
-            os.makedirs(self.frame_dir, exist_ok=True)
-            self.out_path = self.frame_dir
-            if cfg.record_async_writer:
-                import queue
-                self.queue = queue.Queue(maxsize=cfg.record_max_queue)
-                self.thread = threading.Thread(target=self._worker_png, daemon=True)
-                self.thread.start()
+            if not file_path:
+                raise ValueError("file_path required for offline recorder")
+            self.out_path = file_path
+            self.status_path = self.out_path + ".status.json"
+            if fmt == "mp4":
+                if not self.out_path.lower().endswith(".mp4"):
+                    self.out_path += ".mp4"
+                os.makedirs(os.path.dirname(self.out_path), exist_ok=True)
+                self.status_path = self.out_path + ".status.json"
+                self.tmp_path = self.out_path + ".part"
+                self.writer = imageio.get_writer(
+                    self.tmp_path,
+                    format="FFMPEG",
+                    fps=fps,
+                    codec="libx264",
+                    quality=8,
+                    macro_block_size=None,
+                )  # type: ignore
+            elif fmt == "png":
+                stem, _ = os.path.splitext(self.out_path)
+                self.frame_dir_tmp = stem + "_frames.part"
+                self.frame_dir = stem + "_frames"
+                os.makedirs(self.frame_dir_tmp, exist_ok=True)
+                self.out_path = self.frame_dir
+                self.status_path = self.out_path + ".status.json"
+            else:
+                raise ValueError(f"Unknown offline format: {fmt}")
+
+    @classmethod
+    def for_live(
+        cls,
+        folder: str,
+        fps: int,
+        fmt: str,
+        async_writer: bool,
+        max_queue: int,
+        drop_on_backpressure: bool,
+    ) -> "Recorder":
+        return cls(
+            mode="live",
+            folder=folder,
+            fps=fps,
+            fmt=fmt,
+            async_writer=async_writer,
+            max_queue=max_queue,
+            drop_on_backpressure=drop_on_backpressure,
+        )
+
+    @classmethod
+    def for_offline(cls, file_path: str, fps: int, fmt: str) -> "Recorder":
+        return cls(mode="offline", file_path=file_path, fps=fps, fmt=fmt)
 
     def _enqueue(self, arr):
         if not self.queue:
@@ -998,7 +1092,7 @@ class Recorder:
         try:
             self.queue.put_nowait(arr)
         except Exception:
-            if self.cfg.record_skip_on_backpressure:
+            if self.drop_on_backpressure:
                 self.frames_dropped += 1
             else:
                 try:
@@ -1007,21 +1101,25 @@ class Recorder:
                     self.frames_dropped += 1
 
     def capture(self, surface):
-        if not self.live:
+        if not self.live and self.mode != "offline":
+            return
+        if self.fmt == "png" and not self.live:
+            path = os.path.join(self.frame_dir_tmp, f"frame_{self.frame_idx:06d}.png")
+            pygame.image.save(surface, path)
+            self.frame_idx += 1
             return
         surf = surface
-        if self.cfg.scale_percent != 100:
-            w = int(surface.get_width() * self.cfg.scale_percent / 100)
-            h = int(surface.get_height() * self.cfg.scale_percent / 100)
-            surf = pygame.transform.smoothscale(surface, (w, h))
-        arr = pygame.surfarray.array3d(surf).swapaxes(0,1)
-        self._enqueue(arr)
+        arr = pygame.surfarray.array3d(surf).swapaxes(0, 1)
+        if self.live:
+            self._enqueue(arr)
+        else:
+            self._write_frame(arr)
         self.frame_idx += 1
 
     def _write_frame(self, arr):
-        if self.cfg.record_live_format.lower() == "mp4" and _HAS_IMAGEIO:
+        if self.fmt == "mp4":
             if not self.writer:
-                self.writer = imageio.get_writer(self.out_path, fps=self.cfg.fps, codec="libx264", quality=8)  # type: ignore
+                return
             self.writer.append_data(arr)  # type: ignore
         else:
             import imageio
@@ -1030,7 +1128,7 @@ class Recorder:
 
     def _worker_mp4(self):
         import queue
-        writer = imageio.get_writer(self.out_path, fps=self.cfg.fps, codec="libx264", quality=8)  # type: ignore
+        writer = imageio.get_writer(self.out_path, fps=self.fps, codec="libx264", quality=8)  # type: ignore
         while True:
             try:
                 arr = self.queue.get()
@@ -1055,15 +1153,51 @@ class Recorder:
             imageio.imwrite(path, arr)  # type: ignore
             idx += 1
 
+    def finalize(self, success: bool = True):
+        if self.live:
+            if self.queue and self.thread:
+                self.queue.put(None)
+                self.thread.join(timeout=5)
+            elif self.writer:
+                self.writer.close()
+            return self.out_path
+        else:
+            status_path = getattr(self, "status_path", None)
+            if self.fmt == "mp4":
+                if self.writer:
+                    try:
+                        self.writer.close()
+                    except Exception:
+                        success = False
+                if success:
+                    os.replace(self.tmp_path, self.out_path)
+                else:
+                    if os.path.exists(self.tmp_path):
+                        os.remove(self.tmp_path)
+                if status_path and os.path.exists(status_path):
+                    os.remove(status_path)
+                return self.out_path if success else None
+            else:  # png
+                if success:
+                    os.replace(self.frame_dir_tmp, self.frame_dir)
+                    self.out_path = self.frame_dir
+                else:
+                    shutil.rmtree(self.frame_dir_tmp, ignore_errors=True)
+                if status_path and os.path.exists(status_path):
+                    os.remove(status_path)
+                return self.out_path if success else None
+
+
+class NullRecorder:
+    live = False
+    frames_dropped = 0
+    frame_idx = 0
+
+    def capture(self, _surface):
+        return
+
     def finalize(self):
-        if not self.live:
-            return None
-        if self.queue and self.thread:
-            self.queue.put(None)
-            self.thread.join(timeout=5)
-        elif self.writer:
-            self.writer.close()
-        return self.out_path
+        return None
 
 # ------------------------- Pygame Renderer -------------------------
 
@@ -1103,10 +1237,21 @@ class Renderer:
         self.debug_lines: List[str] = []
 
         rcfg = self.sim.cfg.recording
-        fmt = "mp4" if (rcfg.record_live_format.lower() == "mp4" and _HAS_IMAGEIO) else "png"
-        if rcfg.record_live_enabled and rcfg.record_live_format.lower() == "mp4" and not _HAS_IMAGEIO:
-            self.debug_lines.append("MP4 requires imageio + imageio-ffmpeg; recording PNG frames instead.")
-        self.recorder = Recorder(rcfg, self.period_seconds)
+        ok_mp4, _ = _mp4_available()
+        fmt = "mp4" if (rcfg.record_live_format.lower() == "mp4" and ok_mp4) else "png"
+        if rcfg.record_live_enabled and rcfg.record_live_format.lower() == "mp4" and not ok_mp4:
+            self.debug_lines.append("MP4 requires imageio-ffmpeg; recording PNG frames instead.")
+        if rcfg.record_live_enabled:
+            self.recorder = Recorder.for_live(
+                folder=rcfg.record_live_folder,
+                fps=rcfg.fps,
+                fmt=fmt,
+                async_writer=rcfg.record_async_writer,
+                max_queue=rcfg.record_max_queue,
+                drop_on_backpressure=rcfg.record_skip_on_backpressure,
+            )
+        else:
+            self.recorder = NullRecorder()
 
         # Pause menu button rects
         self._pm_rects = {}
@@ -1622,7 +1767,8 @@ class Renderer:
 def render_offline(cfg: SimConfig):
     """
     Render a video directly from current config without interactive playback.
-    Writes MP4 if imageio is available and path endswith .mp4, otherwise PNG frames folder.
+    Uses the configured recorder format, writing MP4 when dependencies are available
+    or falling back to PNG frames.
     This function runs as a separate process from the ESC menu to avoid display conflicts.
     """
     if not _HAS_PYGAME:
@@ -1638,16 +1784,13 @@ def render_offline(cfg: SimConfig):
     class Headless(Renderer):
         def __init__(self, sim):
             os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-            if not pygame.display.get_init():
-                pygame.display.init()
+            pygame.display.init()
             pygame.display.set_mode((1, 1), flags=pygame.HIDDEN)
-            # do not call display.set_mode for main surface
             self.sim = sim
             self.width, self.height = w, h
             self.screen = pygame.Surface((self.width, self.height), flags=pygame.SRCALPHA)
             self.clock = None
 
-            # ensure attributes used by _compute_layout / draw paths exist
             self.fullscreen = False
             self.flags = 0
 
@@ -1664,27 +1807,27 @@ def render_offline(cfg: SimConfig):
             self.period_seconds = float(self.sim.cfg.period_seconds)
             self.debug_overlay = False
             self.paused = False
-            self.recorder = Recorder(live=False, out_dir="", fps=0, fmt="PNG frames")
+            self.recorder = NullRecorder()
             self._last_heading_by_ac = {}
 
-        def run(self): pass  # not used
+        def run(self):
+            pass
 
     sim = LogisticsSim(cfg)
     rnd = Headless(sim)
 
     rc = cfg.recording
     frames_per_period = max(1, rc.frames_per_period)
-    total_frames = cfg.periods * frames_per_period
 
-    # writer
-    write_mp4 = (_HAS_IMAGEIO and rc.offline_output_path.lower().endswith(".mp4"))
-    if write_mp4:
-        writer = imageio.get_writer(rc.offline_output_path, fps=rc.fps, codec="libx264", quality=8)  # type: ignore
-    else:
-        out_dir = os.path.splitext(rc.offline_output_path)[0] + "_frames"
-        os.makedirs(out_dir, exist_ok=True)
+    out_file = rc.offline_output_path or os.path.join(os.getcwd(), f"offline_render.{rc.offline_format}")
+    out_file = os.path.abspath(os.path.expanduser(out_file))
+    fmt = rc.offline_format.lower()
+    if fmt == "mp4":
+        ok, _ = _mp4_available()
+        if not ok:
+            fmt = "png"
+    recorder = Recorder.for_offline(file_path=out_file, fps=rc.fps, fmt=fmt)
 
-    frame_idx = 0
     for period in range(cfg.periods):
         actions = sim.actions_log[-1] if sim.actions_log else []
         for f in range(frames_per_period):
@@ -1694,19 +1837,12 @@ def render_offline(cfg: SimConfig):
             rnd.draw_bars()
             rnd.draw_hud()
             rnd.draw_aircraft(actions, alpha)
-            if write_mp4:
-                arr = pg.surfarray.array3d(rnd.screen).swapaxes(0,1)
-                writer.append_data(arr)  # type: ignore
-            else:
-                frame_file = os.path.join(out_dir, f"frame_{frame_idx:06d}.png")
-                pg.image.save(rnd.screen, frame_file)
-            frame_idx += 1
+            recorder.capture(rnd.screen)
         sim.step_period()
 
-    if write_mp4:
-        writer.close()
+    out_path = recorder.finalize()
     pg.quit()
-    return rc.offline_output_path if write_mp4 else out_dir
+    return out_path
 
 # ------------------------- Tkinter Control GUI -------------------------
 
@@ -2167,8 +2303,9 @@ class ControlGUI:
                 self.live_out_dir.delete(0, tk.END); self.live_out_dir.insert(0, os.path.abspath(d))
         ttk.Button(frm, text="Browse…", command=pick_live_dir).grid(row=2, column=2, sticky="w", padx=6)
 
+        mp4_ok, _ = _mp4_available()
         ttk.Label(frm, text="Live Format").grid(row=3, column=0, sticky="w", pady=(6,0))
-        opts = ["png"] + (["mp4"] if _HAS_IMAGEIO else [])
+        opts = ["png"] + (["mp4"] if mp4_ok else [])
         self.record_format = tk.StringVar(value=(self.cfg.recording.record_live_format if self.cfg.recording.record_live_format in opts else "png"))
         self.record_format_menu = ttk.OptionMenu(frm, self.record_format, self.record_format.get(), *opts)
         self.record_format_menu.grid(row=3, column=1, sticky="w")
@@ -2187,18 +2324,33 @@ class ControlGUI:
         self.fpp_var, _, _, row6 = self._scale_with_entry(frm, "Frames per Period (offline)", 1, 60, "int", self.cfg.recording.frames_per_period)
         row6.grid(row=6, column=0, columnspan=3, sticky="we", pady=(6,0))
 
-        ttk.Label(frm, text="Offline Output").grid(row=7, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Offline Format").grid(row=7, column=0, sticky="w", pady=(6,0))
+        opts_off = ["png"] + (["mp4"] if mp4_ok else [])
+        default_off = self.cfg.recording.offline_format if self.cfg.recording.offline_format in opts_off else ("mp4" if mp4_ok else "png")
+        self.offline_format_var = tk.StringVar(value=default_off)
+        self.offline_format_menu = ttk.OptionMenu(frm, self.offline_format_var, self.offline_format_var.get(), *opts_off)
+        self.offline_format_menu.grid(row=7, column=1, sticky="w")
+
+        ttk.Label(frm, text="Offline Output").grid(row=8, column=0, sticky="w", pady=(6,0))
         self.offline_out = ttk.Entry(frm, width=28)
         self.offline_out.insert(0, self.cfg.recording.offline_output_path)
-        self.offline_out.grid(row=7, column=1, sticky="w")
+        self.offline_out.grid(row=8, column=1, sticky="w")
         def pick_offline_out():
-            path = filedialog.asksaveasfilename(title="Select Offline Output File",
-                                                defaultextension=".mp4",
-                                                initialfile=os.path.basename(self.offline_out.get() or "render.mp4"),
-                                                filetypes=[("MP4 Video","*.mp4"),("All Files","*.*")])
+            fmt = self.offline_format_var.get()
+            if fmt == "mp4" and mp4_ok:
+                path = filedialog.asksaveasfilename(title="Select Offline Output File",
+                                                    defaultextension=".mp4",
+                                                    initialfile=os.path.basename(self.offline_out.get() or "render.mp4"),
+                                                    filetypes=[("MP4 Video","*.mp4"),("All Files","*.*")])
+            else:
+                path = filedialog.asksaveasfilename(title="Select Offline Output File",
+                                                    defaultextension="",
+                                                    initialfile=os.path.basename(self.offline_out.get() or "render"),
+                                                    filetypes=[("All Files","*.*")])
             if path:
-                self.offline_out.delete(0, tk.END); self.offline_out.insert(0, os.path.abspath(path))
-        ttk.Button(frm, text="Browse…", command=pick_offline_out).grid(row=7, column=2, sticky="w", padx=6)
+                self.offline_out.delete(0, tk.END)
+                self.offline_out.insert(0, os.path.abspath(path))
+        ttk.Button(frm, text="Browse…", command=pick_offline_out).grid(row=8, column=2, sticky="w", padx=6)
 
         def do_offline_render():
             if not self._read_back_to_cfg():
@@ -2206,18 +2358,32 @@ class ControlGUI:
             if not _HAS_PYGAME:
                 messagebox.showerror("Missing Dependency", "pygame is required for offline rendering.")
                 return
-            if not self.cfg.recording.offline_output_path:
+            rc = self.cfg.recording
+            if not rc.offline_output_path:
                 messagebox.showerror("Output Required", "Select an offline output file before rendering.")
                 return
-            out_dir = os.path.dirname(self.cfg.recording.offline_output_path) or "."
-            if not os.path.isdir(out_dir):
-                messagebox.showerror("Invalid Path", "Offline output directory does not exist.")
+            ok, _why = _mp4_available()
+            if rc.offline_format.lower() == "mp4" and not ok:
+                messagebox.showerror("MP4 Unavailable", "MP4 requires imageio-ffmpeg (install the 'video' extra).")
+                self.offline_format_var.set("png")
+                rc.offline_format = "png"
+                return
+            out_file = os.path.abspath(os.path.expanduser(rc.offline_output_path))
+            rc.offline_output_path = out_file
+            try:
+                os.makedirs(os.path.dirname(out_file), exist_ok=True)
+                status_path = out_file + ".status.json"
+                with open(status_path, "w", encoding="utf-8") as f:
+                    f.write("{}")
+                os.remove(status_path)
+            except Exception:
+                messagebox.showerror("Permission Error", f"Can't write to {out_file}. Choose a different folder.")
                 return
             save_config(self.cfg)
             try:
                 self.render_proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--offline-render"],
                                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                self.render_status.set(f"Rendering… writing to {self.cfg.recording.offline_output_path}")
+                self.render_status.set(f"Rendering… writing to {rc.offline_output_path}")
                 self.cancel_render_btn.state(["!disabled"])
                 self.reveal_render_btn.state(["disabled"])
                 self._poll_render_proc()
@@ -2225,10 +2391,10 @@ class ControlGUI:
                 messagebox.showerror("Offline Render Failed", str(e))
         self.render_proc = None
         self.offline_btn = ttk.Button(frm, text="Render Offline Video Now", style="Accent.TButton", command=do_offline_render)
-        self.offline_btn.grid(row=8, column=0, columnspan=3, sticky="we", pady=(12,0))
+        self.offline_btn.grid(row=9, column=0, columnspan=3, sticky="we", pady=(12,0))
 
         progress = ttk.Frame(frm, style="Card.TFrame")
-        progress.grid(row=9, column=0, columnspan=3, sticky="we", pady=(6,0))
+        progress.grid(row=10, column=0, columnspan=3, sticky="we", pady=(6,0))
         self.render_status = tk.StringVar(value="")
         ttk.Label(progress, textvariable=self.render_status).pack(side="left")
         self.cancel_render_btn = ttk.Button(progress, text="Cancel", command=self.cancel_render, state="disabled")
@@ -2237,8 +2403,8 @@ class ControlGUI:
         self.reveal_render_btn.pack(side="left", padx=6)
 
         # Info label if MP4 disabled
-        if not _HAS_IMAGEIO:
-            ttk.Label(frm, text="Tip: install 'imageio' + 'imageio-ffmpeg' to enable MP4 output.", foreground="#9ca3af").grid(row=10, column=0, columnspan=3, sticky="w", pady=(6,0))
+        if not mp4_ok:
+            ttk.Label(frm, text="MP4 requires imageio-ffmpeg (install the 'video' extra).", foreground="#9ca3af").grid(row=11, column=0, columnspan=3, sticky="w", pady=(6,0))
 
         frm.columnconfigure(0, weight=1)
         frm.columnconfigure(1, weight=1)
@@ -2265,6 +2431,17 @@ class ControlGUI:
             self.render_proc.terminate()
             self.render_status.set("Render cancelled")
             self.cancel_render_btn.state(["disabled"])
+            part = self.cfg.recording.offline_output_path + ".part"
+            frames_part = os.path.splitext(self.cfg.recording.offline_output_path)[0] + "_frames.part"
+            status = self.cfg.recording.offline_output_path + ".status.json"
+            for p in [part, frames_part, status]:
+                if os.path.isdir(p):
+                    shutil.rmtree(p, ignore_errors=True)
+                elif os.path.isfile(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
             self.render_proc = None
 
     def reveal_render(self):
@@ -2361,7 +2538,8 @@ class ControlGUI:
         rc.record_skip_on_backpressure = bool(self.drop_var.get())
         rc.fps = int(self.fps_var.get())
         rc.frames_per_period = int(self.fpp_var.get())
-        offline = self.offline_out.get().strip()
+        rc.offline_format = self.offline_format_var.get()
+        offline = os.path.expanduser(self.offline_out.get().strip())
         rc.offline_output_path = os.path.abspath(offline) if offline else ""
         rc.include_hud = bool(self.rec_hud.get())
         rc.include_debug = bool(self.rec_debug.get())
@@ -2403,21 +2581,29 @@ class ControlGUI:
             self.start_btn.state(["!disabled"])
             if hasattr(self, "offline_btn"):
                 self.offline_btn.state(["!disabled"])
-        if not _HAS_IMAGEIO:
-            msg.append("imageio/imageio-ffmpeg missing — MP4 assembly disabled")
-            m = self.record_format_menu["menu"]
-            try:
-                m.entryconfig("mp4", state="disabled")
-            except Exception:
-                pass
+        mp4_ok, _ = _mp4_available()
+        menus = [self.record_format_menu]
+        if hasattr(self, "offline_format_menu"):
+            menus.append(self.offline_format_menu)
+        if not mp4_ok:
+            msg.append("imageio-ffmpeg missing — MP4 disabled")
+            for menu in menus:
+                m = menu["menu"]
+                try:
+                    m.entryconfig("mp4", state="disabled")
+                except Exception:
+                    pass
             if self.record_format.get() == "mp4":
                 self.record_format.set("png")
+            if hasattr(self, "offline_format_var") and self.offline_format_var.get() == "mp4":
+                self.offline_format_var.set("png")
         else:
-            m = self.record_format_menu["menu"]
-            try:
-                m.entryconfig("mp4", state="normal")
-            except Exception:
-                pass
+            for menu in menus:
+                m = menu["menu"]
+                try:
+                    m.entryconfig("mp4", state="normal")
+                except Exception:
+                    pass
         self.dep_msg.configure(text=("; ".join(msg) if msg else "All dependencies available."),
                                 foreground=self.cfg.theme.game_muted)
 
@@ -2457,6 +2643,7 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
         cfg.periods = 2
         cfg.recording.frames_per_period = 1
         cfg.recording.record_live_format = "png"
+        cfg.recording.offline_format = "png"
         slug = name.replace(" ", "_")
         cfg.recording.offline_output_path = os.path.join(out_dir, f"{slug}.png")
         render_offline(cfg)
