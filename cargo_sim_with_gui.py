@@ -62,6 +62,15 @@ def _hex(h):  # helper to clamp/normalize hex
         h = "".join([c*2 for c in h])
     return "#" + h.lower()
 
+def hex_to_rgb(h: str):
+    h = h.strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join([c*2 for c in h])
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+def blend(a, b, t: float):
+    return tuple(int(a[i]*(1-t) + b[i]*t) for i in range(3))
+
 THEME_PRESETS = {
     # name: dict fields for ThemeConfig
     "Classic Light": {
@@ -94,16 +103,16 @@ THEME_PRESETS = {
     },
     "Cyber": {
         "menu_theme": "dark",
-        "game_bg": _hex("080a1a"),
-        "game_fg": _hex("e0f2fe"),
-        "game_muted": _hex("7dd3fc"),
-        "hub_color": _hex("0ea5e9"),
-        "good_spoke": _hex("22d3ee"),
-        "bad_spoke": _hex("f43f5e"),
-        "bar_A": _hex("22d3ee"),
-        "bar_B": _hex("a78bfa"),
-        "bar_C": _hex("06b6d4"),
-        "bar_D": _hex("f97316"),
+        "game_bg": _hex("000000"),
+        "game_fg": _hex("00ff41"),
+        "game_muted": _hex("00cc33"),
+        "hub_color": _hex("003311"),
+        "good_spoke": _hex("00ff41"),
+        "bad_spoke": _hex("00ff41"),
+        "bar_A": _hex("00ff41"),
+        "bar_B": _hex("00e63a"),
+        "bar_C": _hex("00cc33"),
+        "bar_D": _hex("009926"),
         "default_airframe_colorset": "High Contrast",
     },
     "GitHub Light": {
@@ -1055,20 +1064,15 @@ class Renderer:
 
         # Theme colors
         t = self.sim.cfg.theme
-        def hex2rgb(h):
-            h = h.lstrip("#")
-            return tuple(int(h[i:i+2], 16) for i in (0,2,4))
-        self.bg = hex2rgb(t.game_bg)
-        self.white = hex2rgb(t.game_fg)
-        self.grey = hex2rgb(t.game_muted)
-        self.hub_color = hex2rgb(t.hub_color)
-        self.good_spoke_col = hex2rgb(t.good_spoke)
-        self.bad_spoke_col = hex2rgb(t.bad_spoke)
-        self.ac_colors = {k: hex2rgb(v) for k,v in t.ac_colors.items()}
-        self.bar_cols = [hex2rgb(t.bar_A), hex2rgb(t.bar_B), hex2rgb(t.bar_C), hex2rgb(t.bar_D)]
+        self.bg = hex_to_rgb(t.game_bg)
+        self.white = hex_to_rgb(t.game_fg)
+        self.grey = hex_to_rgb(t.game_muted)
+        self.hub_color = hex_to_rgb(t.hub_color)
+        self.good_spoke_col = hex_to_rgb(t.good_spoke)
+        self.bad_spoke_col = hex_to_rgb(t.bad_spoke)
+        self.ac_colors = {k: hex_to_rgb(v) for k,v in t.ac_colors.items()}
+        self.bar_cols = [hex_to_rgb(t.bar_A), hex_to_rgb(t.bar_B), hex_to_rgb(t.bar_C), hex_to_rgb(t.bar_D)]
 
-        def blend(a, b, tt):
-            return tuple(int(a[i]*(1-tt) + b[i]*tt) for i in range(3))
         self.panel_bg = blend(self.bg, self.hub_color, 0.3)
         self.panel_btn = blend(self.bg, self.hub_color, 0.5)
         self.panel_btn_fg = self.white
@@ -1122,13 +1126,30 @@ class Renderer:
         hub_text = self.bigfont.render("HUB", True, self.white)
         self.screen.blit(hub_text, (self.cx - hub_text.get_width()//2, self.cy - 30))
 
-        # Spokes: green if A>0 and B>0
+        is_cyber = (self.sim.cfg.theme.preset == "Cyber")
         for i, (x, y) in enumerate(self.spoke_pos):
             has_A = self.sim.stock[i][0] > 0
             has_B = self.sim.stock[i][1] > 0
-            color = self.good_spoke_col if (has_A and has_B) else self.bad_spoke_col
-            pygame.draw.circle(self.screen, color, (int(x), int(y)), 9)
-            label = self.font.render(f"S{i+1}", True, self.white)
+            if is_cyber and not (has_A and has_B):
+                t = time.time()
+                pulse = (math.sin(t * math.tau * 1.8) + 1) / 2
+                dark = hex_to_rgb("#004d19")
+                color = blend(dark, self.good_spoke_col, pulse)
+                pygame.draw.circle(self.screen, color, (int(x), int(y)), 9)
+                r = 14
+                segs = 12
+                phase = (t * 1.8) % 1
+                for n in range(segs):
+                    if (n + phase * segs) % 2 < 1:
+                        a1 = (n / segs) * 2 * math.pi
+                        a2 = ((n + 0.5) / segs) * 2 * math.pi
+                        pygame.draw.arc(self.screen, color, (int(x - r), int(y - r), r*2, r*2), a1, a2, 2)
+                lbl_col = color
+            else:
+                color = self.good_spoke_col if (has_A and has_B) else self.bad_spoke_col
+                pygame.draw.circle(self.screen, color, (int(x), int(y)), 9)
+                lbl_col = self.white
+            label = self.font.render(f"S{i+1}", True, lbl_col)
             self.screen.blit(label, (int(x) - label.get_width()//2, int(y) - 26))
 
     def draw_bars(self):
@@ -1186,7 +1207,12 @@ class Renderer:
                     a = (alpha / 0.5)
                     p0 = node_xy(s[0]); p1 = node_xy(s[1])
                     pos = (p0[0] + (p1[0]-p0[0])*a, p0[1] + (p1[1]-p0[1])*a)
-                    angle = math.atan2(p1[1]-p0[1], p1[0]-p0[0])
+                    leg_angle = math.atan2(p1[1]-p0[1], p1[0]-p0[0])
+                    if s[0] == "HUB":
+                        rot_a = min(a/0.15, 1.0)
+                        angle = -math.pi/2 + (leg_angle - (-math.pi/2)) * rot_a
+                    else:
+                        angle = leg_angle
                 elif alpha > 0.5 and len(segs) >= 2:
                     s = segs[1]
                     a = (alpha - 0.5) / 0.5
@@ -1543,17 +1569,14 @@ def render_offline(cfg: SimConfig):
 
             # theme
             t = self.sim.cfg.theme
-            def hex2rgb(h):
-                h = h.lstrip("#")
-                return tuple(int(h[i:i+2], 16) for i in (0,2,4))
-            self.bg = hex2rgb(t.game_bg)
-            self.white = hex2rgb(t.game_fg)
-            self.grey = hex2rgb(t.game_muted)
-            self.hub_color = hex2rgb(t.hub_color)
-            self.good_spoke_col = hex2rgb(t.good_spoke)
-            self.bad_spoke_col = hex2rgb(t.bad_spoke)
-            self.ac_colors = {k: hex2rgb(v) for k,v in t.ac_colors.items()}
-            self.bar_cols = [hex2rgb(t.bar_A), hex2rgb(t.bar_B), hex2rgb(t.bar_C), hex2rgb(t.bar_D)]
+            self.bg = hex_to_rgb(t.game_bg)
+            self.white = hex_to_rgb(t.game_fg)
+            self.grey = hex_to_rgb(t.game_muted)
+            self.hub_color = hex_to_rgb(t.hub_color)
+            self.good_spoke_col = hex_to_rgb(t.good_spoke)
+            self.bad_spoke_col = hex_to_rgb(t.bad_spoke)
+            self.ac_colors = {k: hex_to_rgb(v) for k,v in t.ac_colors.items()}
+            self.bar_cols = [hex_to_rgb(t.bar_A), hex_to_rgb(t.bar_B), hex_to_rgb(t.bar_C), hex_to_rgb(t.bar_D)]
 
             pygame.font.init()
             self.font = pygame.font.SysFont("consolas", 18)
@@ -1564,8 +1587,6 @@ def render_offline(cfg: SimConfig):
             self.paused = False
 
             # derive panel colors from theme so pause/menu visuals stay on-brand
-            def blend(a, b, t):
-                return tuple(int(a[i]*(1-t) + b[i]*t) for i in range(3))
             self.panel_bg = blend(self.bg, self.hub_color, 0.3)
             self.panel_btn = blend(self.bg, self.hub_color, 0.5)
             self.panel_btn_fg = self.white
@@ -1673,14 +1694,11 @@ class ControlGUI:
 
     def _apply_menu_theme(self, style: ttk.Style, mode: str):
         t = self.cfg.theme
-        def hex2rgb(h):
-            h = h.lstrip("#")
-            return tuple(int(h[i:i+2], 16) for i in (0,2,4))
         def rgb2hex(rgb):
             return "#%02x%02x%02x" % rgb
         def blend_hex(h1, h2, tt):
-            a = hex2rgb(h1); b = hex2rgb(h2)
-            c = tuple(int(a[i]*(1-tt) + b[i]*tt) for i in range(3))
+            a = hex_to_rgb(h1); b = hex_to_rgb(h2)
+            c = blend(a, b, tt)
             return rgb2hex(c)
         bg = t.game_bg
         card_bg = blend_hex(t.game_bg, t.hub_color, 0.3)
@@ -1724,6 +1742,14 @@ class ControlGUI:
                    background=[("selected", card_bg), ("active", field_bg)],
                    foreground=[("selected", fg)])
         style.configure("Horizontal.TScale", background=card_bg, troughcolor=field_bg)
+
+    def _add_page_note(self, parent, short, detail):
+        bar = ttk.Frame(parent, style="Card.TFrame")
+        bar.grid(row=0, column=0, columnspan=4, sticky="we", pady=(0,8))
+        ttk.Label(bar, text=short).pack(side="left", anchor="w")
+        def show():
+            messagebox.showinfo("Page Notes", detail)
+        ttk.Button(bar, text="Learn more …", command=show).pack(side="right")
 
     # ---- Helpers for "Scale + Entry" controls ----
     def _scale_with_entry(self, parent, label_text, from_, to_, var_type="int", init=0):
@@ -1854,19 +1880,21 @@ class ControlGUI:
     def build_schedule_tab(self, tab):
         frm = ttk.Frame(tab, style="Card.TFrame")
         frm.pack(fill="both", expand=True)
+        self._add_page_note(frm, "Refine the scheduler with advanced options.",
+                            "Refine the scheduler with anti-bunching, A/B target days-of-supply, and emergency A preemption. Useful to reduce oscillation and starvation.")
 
-        ttk.Label(frm, text="Milk‑run Pair Order (1‑based pairs, e.g. 1-2,3-4,5-6,7-8,9-10)").grid(row=0, column=0, sticky="w", columnspan=2)
+        ttk.Label(frm, text="Milk‑run Pair Order (1‑based pairs, e.g. 1-2,3-4,5-6,7-8,9-10)").grid(row=1, column=0, sticky="w", columnspan=2)
         default_text = ",".join([f"{i+1}-{j+1}" for (i,j) in self.cfg.pair_order])
         self.pairs_entry = ttk.Entry(frm, width=42)
         self.pairs_entry.insert(0, default_text)
-        self.pairs_entry.grid(row=1, column=0, columnspan=2, sticky="we", pady=(4,8))
+        self.pairs_entry.grid(row=2, column=0, columnspan=2, sticky="we", pady=(4,8))
 
-        ttk.Label(frm, text="Planner priority", foreground="#9ca3af").grid(row=2, column=0, sticky="w")
-        ttk.Label(frm, text="A-first, then B, else C/D (fixed)", foreground="#9ca3af").grid(row=2, column=1, sticky="w")
+        ttk.Label(frm, text="Planner priority", foreground="#9ca3af").grid(row=3, column=0, sticky="w")
+        ttk.Label(frm, text="A-first, then B, else C/D (fixed)", foreground="#9ca3af").grid(row=3, column=1, sticky="w")
 
-        ttk.Separator(frm).grid(row=3, column=0, columnspan=2, sticky="we", pady=8)
+        ttk.Separator(frm).grid(row=4, column=0, columnspan=2, sticky="we", pady=8)
         adm = ttk.LabelFrame(frm, text="Advanced Decision Making")
-        adm.grid(row=4, column=0, columnspan=2, sticky="we")
+        adm.grid(row=5, column=0, columnspan=2, sticky="we")
         self.adm_enable = tk.BooleanVar(value=self.cfg.adm.adm_enable)
         ttk.Checkbutton(adm, text="Enable", variable=self.adm_enable).grid(row=0, column=0, sticky="w")
         ttk.Label(adm, text="Fairness cooldown").grid(row=1, column=0, sticky="w")
@@ -1891,9 +1919,11 @@ class ControlGUI:
     def build_gameplay_tab(self, tab):
         frm = ttk.Frame(tab, style="Card.TFrame")
         frm.pack(fill="both", expand=True)
+        self._add_page_note(frm, "Realism adjusts leg times using distance.",
+                            "Realism adjusts leg times using distance; Fleet Optimization changes how sorties are chosen. Turn these on to study operational tradeoffs.")
 
         realism = ttk.LabelFrame(frm, text="Realism")
-        realism.grid(row=0, column=0, sticky="we")
+        realism.grid(row=1, column=0, sticky="we")
         self.gp_realism_enable = tk.BooleanVar(value=self.cfg.gameplay.gp_realism_enable)
         ttk.Checkbutton(realism, text="Enable realism tweaks", variable=self.gp_realism_enable).grid(row=0, column=0, sticky="w")
         self.gp_legtime_distance_model = tk.BooleanVar(value=self.cfg.gameplay.gp_legtime_distance_model)
@@ -1909,7 +1939,7 @@ class ControlGUI:
         realism.columnconfigure(0, weight=1)
 
         fleet = ttk.LabelFrame(frm, text="Fleet Optimization")
-        fleet.grid(row=1, column=0, sticky="we", pady=(8,0))
+        fleet.grid(row=2, column=0, sticky="we", pady=(8,0))
         self.gp_fleetopt_enable = tk.BooleanVar(value=self.cfg.gameplay.gp_fleetopt_enable)
         ttk.Checkbutton(fleet, text="Enable fleet optimization", variable=self.gp_fleetopt_enable).grid(row=0, column=0, sticky="w")
         self.gp_weight_vars = {}
@@ -1926,35 +1956,54 @@ class ControlGUI:
     def build_visual_tab(self, tab):
         frm = ttk.Frame(tab, style="Card.TFrame")
         frm.pack(fill="both", expand=True)
+        self._add_page_note(frm, "Control on-screen visuals.",
+                            "Control on-screen visuals. Right panel can show total ops, a sparkline, or per-spoke bars. Orientation points aircraft toward their destination; at HUB they face north.")
 
-        self.per_sec_var, _, _, row0 = self._scale_with_entry(frm, "Seconds per Period", 0.3, 5.0, "float", self.cfg.period_seconds)
-        row0.grid(row=0, column=0, columnspan=2, sticky="we")
+        ttk.Label(frm, text="Seconds per Period").grid(row=1, column=0, sticky="w")
+        self.per_sec_var = tk.DoubleVar(value=self.cfg.period_seconds)
+        per_scale = ttk.Scale(frm, from_=0.05, to=2.0, orient="horizontal", variable=self.per_sec_var)
+        per_scale.grid(row=1, column=1, sticky="we")
+        self.per_sec_lbl = ttk.Label(frm, text=f"sec/period: {self.cfg.period_seconds:.2f}")
+        self.per_sec_lbl.grid(row=1, column=2, sticky="w")
+        self.per_sec_warn = ttk.Label(frm, text="", foreground="red")
+        self.per_sec_warn.grid(row=2, column=0, columnspan=3, sticky="w")
 
-        ttk.Label(frm, text="Show Aircraft Labels").grid(row=1, column=0, sticky="w", pady=(6,0))
+        def _upd_sec(_=None):
+            val = max(0.05, min(2.0, self.per_sec_var.get()))
+            val = round(val / 0.05) * 0.05
+            self.per_sec_var.set(val)
+            self.per_sec_lbl.config(text=f"sec/period: {val:.2f}")
+            warn = (val <= 0.10 and self.cfg.recording.record_live_enabled and
+                    self.cfg.recording.record_live_format == "mp4" and not self.cfg.recording.record_async_writer)
+            self.per_sec_warn.config(text="Performance warning" if warn else "")
+        per_scale.bind("<B1-Motion>", _upd_sec)
+        per_scale.bind("<ButtonRelease-1>", _upd_sec)
+
+        ttk.Label(frm, text="Show Aircraft Labels").grid(row=3, column=0, sticky="w", pady=(6,0))
         self.show_aircraft_labels = tk.BooleanVar(value=self.cfg.show_aircraft_labels)
-        ttk.Checkbutton(frm, variable=self.show_aircraft_labels).grid(row=1, column=1, sticky="w")
+        ttk.Checkbutton(frm, variable=self.show_aircraft_labels).grid(row=3, column=1, sticky="w")
 
-        ttk.Label(frm, text="Debug Mode (overlay + log)").grid(row=2, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Debug Mode (overlay + log)").grid(row=4, column=0, sticky="w", pady=(6,0))
         self.debug_mode = tk.BooleanVar(value=self.cfg.debug_mode)
-        ttk.Checkbutton(frm, variable=self.debug_mode).grid(row=2, column=1, sticky="w")
+        ttk.Checkbutton(frm, variable=self.debug_mode).grid(row=4, column=1, sticky="w")
 
-        ttk.Label(frm, text="Stats Mode").grid(row=3, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Stats Mode").grid(row=5, column=0, sticky="w", pady=(6,0))
         self.stats_mode = tk.StringVar(value=self.cfg.stats_mode)
-        ttk.OptionMenu(frm, self.stats_mode, self.cfg.stats_mode, "total", "average").grid(row=3, column=1, sticky="w")
+        ttk.OptionMenu(frm, self.stats_mode, self.cfg.stats_mode, "total", "average").grid(row=5, column=1, sticky="w")
 
-        ttk.Label(frm, text="Right Panel View").grid(row=4, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Right Panel View").grid(row=6, column=0, sticky="w", pady=(6,0))
         self.right_panel_view = tk.StringVar(value=self.cfg.right_panel_view)
         ttk.OptionMenu(frm, self.right_panel_view, self.cfg.right_panel_view,
-                       "ops_total_number", "ops_total_sparkline", "per_spoke").grid(row=4, column=1, sticky="w")
+                       "ops_total_number", "ops_total_sparkline", "per_spoke").grid(row=6, column=1, sticky="w")
 
-        ttk.Label(frm, text="Orient Aircraft Toward Destination").grid(row=5, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Orient Aircraft Toward Destination").grid(row=7, column=0, sticky="w", pady=(6,0))
         self.orient_ac = tk.BooleanVar(value=self.cfg.orient_aircraft)
-        ttk.Checkbutton(frm, variable=self.orient_ac).grid(row=5, column=1, sticky="w")
+        ttk.Checkbutton(frm, variable=self.orient_ac).grid(row=7, column=1, sticky="w")
 
-        ttk.Separator(frm).grid(row=6, column=0, columnspan=2, sticky="we", pady=8)
+        ttk.Separator(frm).grid(row=8, column=0, columnspan=3, sticky="we", pady=8)
 
         rec = ttk.LabelFrame(frm, text="Recording Overlays")
-        rec.grid(row=7, column=0, columnspan=2, sticky="we")
+        rec.grid(row=9, column=0, columnspan=3, sticky="we")
         self.rec_hud = tk.BooleanVar(value=self.cfg.recording.include_hud)
         ttk.Checkbutton(rec, text="Include HUD in recording", variable=self.rec_hud).grid(row=0, column=0, sticky="w")
         self.rec_debug = tk.BooleanVar(value=self.cfg.recording.include_debug)
@@ -1980,8 +2029,10 @@ class ControlGUI:
     def build_theme_tab(self, tab):
         frm = ttk.Frame(tab, style="Card.TFrame")
         frm.pack(fill="both", expand=True)
+        self._add_page_note(frm, "Choose a preset visual style.",
+                            "Choose a preset visual style. Presets affect the control panel, map, pause menu, and side panels. Cyber uses only green/black. Aircraft color maps remain independent.")
 
-        ttk.Label(frm, text="Theme Preset").grid(row=0, column=0, sticky="w")
+        ttk.Label(frm, text="Theme Preset").grid(row=1, column=0, sticky="w")
         self.theme_preset = tk.StringVar(value=self.cfg.theme.preset)
         presets = list(THEME_PRESETS.keys())
         def on_theme_change(choice):
@@ -1992,11 +2043,11 @@ class ControlGUI:
             self._apply_menu_theme(ttk.Style(), self.cfg.theme.menu_theme)
             self._update_dep_state()
             save_config(self.cfg)
-        ttk.OptionMenu(frm, self.theme_preset, self.cfg.theme.preset, *presets, command=lambda _: on_theme_change(None)).grid(row=0, column=1, sticky="w")
+        ttk.OptionMenu(frm, self.theme_preset, self.cfg.theme.preset, *presets, command=lambda _: on_theme_change(None)).grid(row=1, column=1, sticky="w")
 
-        ttk.Separator(frm).grid(row=1, column=0, columnspan=2, sticky="we", pady=8)
+        ttk.Separator(frm).grid(row=2, column=0, columnspan=2, sticky="we", pady=8)
 
-        ttk.Label(frm, text="Airframe Color Map").grid(row=2, column=0, sticky="w")
+        ttk.Label(frm, text="Airframe Color Map").grid(row=3, column=0, sticky="w")
         self.color_map = tk.StringVar(value=self.cfg.theme.ac_colorset or "Neutral Grays")
         def on_colorset_change(*_):
             cmap_name = self.color_map.get()
@@ -2004,38 +2055,40 @@ class ControlGUI:
             self.cfg.theme.ac_colorset = cmap_name
             self.cfg.theme.ac_colors = cmap
             save_config(self.cfg)
-        ttk.OptionMenu(frm, self.color_map, self.color_map.get(), *AIRFRAME_COLORSETS.keys(), command=on_colorset_change).grid(row=2, column=1, sticky="w")
+        ttk.OptionMenu(frm, self.color_map, self.color_map.get(), *AIRFRAME_COLORSETS.keys(), command=on_colorset_change).grid(row=3, column=1, sticky="w")
 
         frm.columnconfigure(1, weight=1)
 
     def build_record_tab(self, tab):
         frm = ttk.Frame(tab, style="Card.TFrame")
         frm.pack(fill="both", expand=True)
+        self._add_page_note(frm, "Capture live sessions or render offline.",
+                            "Capture live sessions or render offline. Choose destination paths (required). Overlays let you burn in stats and HUD elements into the video.")
 
         self.record_live = tk.BooleanVar(value=self.cfg.recording.record_live_enabled)
-        ttk.Checkbutton(frm, text="Record Live Session", variable=self.record_live).grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(frm, text="Record Live Session", variable=self.record_live).grid(row=1, column=0, sticky="w")
 
-        ttk.Label(frm, text="Live Output Folder").grid(row=1, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Live Output Folder").grid(row=2, column=0, sticky="w", pady=(6,0))
         self.live_out_dir = ttk.Entry(frm, width=28)
         self.live_out_dir.insert(0, self.cfg.recording.record_live_folder)
-        self.live_out_dir.grid(row=1, column=1, sticky="w")
+        self.live_out_dir.grid(row=2, column=1, sticky="w")
         def pick_live_dir():
             d = filedialog.askdirectory(title="Select Output Folder", initialdir=os.path.abspath(self.live_out_dir.get() or "."))
             if d:
                 self.live_out_dir.delete(0, tk.END); self.live_out_dir.insert(0, os.path.abspath(d))
-        ttk.Button(frm, text="Browse…", command=pick_live_dir).grid(row=1, column=2, sticky="w", padx=6)
+        ttk.Button(frm, text="Browse…", command=pick_live_dir).grid(row=2, column=2, sticky="w", padx=6)
 
-        ttk.Label(frm, text="Live Format").grid(row=2, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Live Format").grid(row=3, column=0, sticky="w", pady=(6,0))
         opts = ["png"] + (["mp4"] if _HAS_IMAGEIO else [])
         self.record_format = tk.StringVar(value=(self.cfg.recording.record_live_format if self.cfg.recording.record_live_format in opts else "png"))
         self.record_format_menu = ttk.OptionMenu(frm, self.record_format, self.record_format.get(), *opts)
-        self.record_format_menu.grid(row=2, column=1, sticky="w")
+        self.record_format_menu.grid(row=3, column=1, sticky="w")
 
         self.async_writer = tk.BooleanVar(value=self.cfg.recording.record_async_writer)
-        ttk.Checkbutton(frm, text="Async writer", variable=self.async_writer).grid(row=3, column=0, sticky="w", pady=(6,0))
-        ttk.Label(frm, text="Max Queue").grid(row=3, column=1, sticky="w")
+        ttk.Checkbutton(frm, text="Async writer", variable=self.async_writer).grid(row=4, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Max Queue").grid(row=4, column=1, sticky="w")
         self.queue_var = tk.IntVar(value=self.cfg.recording.record_max_queue)
-        ttk.Spinbox(frm, from_=1, to=256, textvariable=self.queue_var, width=5).grid(row=3, column=2, sticky="w")
+        ttk.Spinbox(frm, from_=1, to=256, textvariable=self.queue_var, width=5).grid(row=4, column=2, sticky="w")
         self.drop_var = tk.BooleanVar(value=self.cfg.recording.record_skip_on_backpressure)
         ttk.Checkbutton(frm, text="Drop on backpressure", variable=self.drop_var).grid(row=4, column=0, columnspan=2, sticky="w")
 
@@ -2319,21 +2372,18 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
         cfg.recording.offline_output_path = os.path.join(out_dir, f"{slug}.png")
         render_offline(cfg)
 
-        def hex2rgb(h):
-            h = h.lstrip('#')
-            return tuple(int(h[i:i+2], 16) for i in (0,2,4))
         def luminance(rgb):
             def chan(c):
                 c /= 255
                 return c/12.92 if c <= 0.03928 else ((c+0.055)/1.055) ** 2.4
             r,g,b = [chan(x) for x in rgb]
             return 0.2126*r + 0.7152*g + 0.0722*b
-        fg = hex2rgb(cfg.theme.game_fg); bg = hex2rgb(cfg.theme.game_bg)
+        fg = hex_to_rgb(cfg.theme.game_fg); bg = hex_to_rgb(cfg.theme.game_bg)
         L1, L2 = luminance(fg), luminance(bg)
         ratio = (max(L1,L2)+0.05)/(min(L1,L2)+0.05)
         if ratio < 4.5:
             print(f"Contrast warning for {name}: {ratio:.2f}")
-        bars = [hex2rgb(cfg.theme.bar_A), hex2rgb(cfg.theme.bar_B), hex2rgb(cfg.theme.bar_C), hex2rgb(cfg.theme.bar_D)]
+        bars = [hex_to_rgb(cfg.theme.bar_A), hex_to_rgb(cfg.theme.bar_B), hex_to_rgb(cfg.theme.bar_C), hex_to_rgb(cfg.theme.bar_D)]
         for i in range(4):
             for j in range(i+1,4):
                 diff = sum(abs(bars[i][k]-bars[j][k]) for k in range(3))
