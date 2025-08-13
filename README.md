@@ -24,6 +24,7 @@ Key highlights: `SPACE` pause, `←/→` step, `+/-` speed, `R` reset, `D` debug
 ## Recording
 Live recording writes MP4 or PNG when a folder is set. Offline rendering requires a file path and runs atomically with progress and cancel options.
 By default, recordings capture the fullscreen resolution with all HUD and side panels visible.
+Offline rendering uses the same fullscreen layout and overlays.
 ## Advanced Decision Making
 Fairness cooldown, A/B target DoS, emergency A preempt, deterministic RNG seed.
 
