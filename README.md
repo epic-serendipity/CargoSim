@@ -11,6 +11,8 @@ CargoSim models a hub-and-spoke airlift network with daily AM/PM cadence. Aircra
 - Periods alternate AM/PM; arrivals apply at the next period.
 - **Ops gate:** A+B+C+D must all be >0 for an op to run.
 - Only ops consume C and D. PM consumption requires A>0 and B>0 and reduces only A and B.
+- A spoke is operational (green) only if it has A, B, C, and D on hand now (arrivals become usable next period).
+- Each op consumes one unit of C and D at that spoke; A and B gate PM consumption and ops eligibility but are not consumed by the op itself.
 
 ## Features
 - Five themes: GitHub Dark, Classic Light, Solarized Light, Night Ops, Cyber (green/black).

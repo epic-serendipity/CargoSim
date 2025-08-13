@@ -8,6 +8,7 @@ import subprocess
 import threading
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
+from types import SimpleNamespace
 
 # --- Tk first (always available on Win/macOS, may require apt on Linux) ---
 import tkinter as tk
@@ -36,7 +37,7 @@ except Exception:
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_config.json")
 DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_debug.log")
-CONFIG_VERSION = 4
+CONFIG_VERSION = 5
 
 # ------------------------- Defaults & Model Parameters -------------------------
 
@@ -51,6 +52,15 @@ D_PERIOD_DAYS_DFLT = 4  # D: 1 every 4 days
 
 # Visual scaling for spoke bars (purely aesthetic; no caps)
 VIS_CAPS_DFLT = (6, 2, 4, 4)  # used for relative bar heights
+
+# ------------------------- Ops Gate Helper -------------------------
+
+def _row_to_spoke(row: List[float]) -> SimpleNamespace:
+    return SimpleNamespace(A=row[0], B=row[1], C=row[2], D=row[3])
+
+def is_ops_capable(spoke, *, epsilon=1e-9) -> bool:
+    # Must reflect ONLY inventory available **now**, not in-flight or next-period arrivals.
+    return (spoke.A > epsilon and spoke.B > epsilon and spoke.C > epsilon and spoke.D > epsilon)
 
 # ------------------------- Theme Presets & Color Maps -------------------------
 
@@ -420,6 +430,7 @@ class SimConfig:
     recording: RecordingConfig = field(default_factory=RecordingConfig)
     adm: AdvancedDecisionConfig = field(default_factory=AdvancedDecisionConfig)
     gameplay: GameplayConfig = field(default_factory=GameplayConfig)
+    launch_fullscreen: bool = True
 
     def to_json(self) -> dict:
         return {
@@ -441,6 +452,7 @@ class SimConfig:
             "show_dos_tooltips": self.show_dos_tooltips,
             "hud_show_churn": self.hud_show_churn,
             "cursor_color": self.cursor_color,
+            "launch_fullscreen": self.launch_fullscreen,
             "theme": self.theme.to_json(),
             "recording": self.recording.to_json(),
             "adm": self.adm.to_json(),
@@ -476,6 +488,7 @@ class SimConfig:
         cfg.cursor_color = d.get("cursor_color", cfg.cursor_color)
         if cfg.cursor_color not in CURSOR_COLORS:
             cfg.cursor_color = "Cobalt"
+        cfg.launch_fullscreen = bool(d.get("launch_fullscreen", cfg.launch_fullscreen))
         cfg.theme = ThemeConfig.from_json(d.get("theme", {}))
         cfg.recording = RecordingConfig.from_json(d.get("recording", {}))
         cfg.adm = AdvancedDecisionConfig.from_json(d.get("adm", {}))
@@ -650,20 +663,22 @@ class LogisticsSim:
         # Stats
         self.ops_by_spoke = [0]*self.M  # counts of OFFLOAD occurrences per spoke
         self.ops_total_history = [0]
+        self.integrity_violations: List[str] = []
+        self._integrity_logged = False
 
         # History for rewind
         self.history: List[dict] = []
         self.push_snapshot()  # store initial state (period 0 before any action)
 
     def can_run_op(self, s: int) -> bool:
-        a, b, c, d = self.stock[s]
-        return a > 0 and b > 0 and c > 0 and d > 0
+        return is_ops_capable(_row_to_spoke(self.stock[s]))
 
     def run_op(self, s: int, amount: int = 1) -> bool:
-        if not self.can_run_op(s):
+        if not is_ops_capable(_row_to_spoke(self.stock[s])):
             return False
-        self.stock[s][2] = max(0, self.stock[s][2] - amount)
+        self.stock[s][2] = max(0.0, self.stock[s][2] - amount)
         self.stock[s][3] = max(0, self.stock[s][3] - amount)
+        assert self.stock[s][2] >= -1e-9 and self.stock[s][3] >= -1e-9, "C/D negative after op"
         self.ops_by_spoke[s] += 1
         return True
 
@@ -762,7 +777,7 @@ class LogisticsSim:
         pre_stock = [row[:] for row in self.stock]
         ops_before = self.ops_by_spoke[:]
 
-        # 1) Apply arrivals
+        # 1) APPLY_ARRIVALS_FROM_PREVIOUS_PERIOD
         for s in range(self.M):
             if self.arrivals_next[s]:
                 add = [0,0,0,0]
@@ -771,10 +786,7 @@ class LogisticsSim:
                 self.arrivals_next[s].clear()
                 for k in range(4): self.stock[s][k] += add[k]
 
-        # 2) Operational if and only if A,B,C,D>0
-        for s in range(self.M):
-            self.op[s] = self.can_run_op(s)
-
+        # 2) RECOMPUTE_STATE_SNAPSHOTS (flags derived from stock)
         stage = self.detect_stage()
         actions_this_period: List[Tuple[str,str]] = []
         pairs_used = set()  # ensure unique pair per period across all aircraft
@@ -806,7 +818,8 @@ class LogisticsSim:
             if ac.state == "AT_SPOKEA":
                 i = ac.plan[0]
                 self.arrivals_next[i].append(ac.payload_A[:])
-                self.run_op(i)
+                if is_ops_capable(_row_to_spoke(self.stock[i])):
+                    self.run_op(i)
                 actions_this_period.append((ac.name, f"OFFLOAD@S{i+1}"))
                 ac.payload_A = [0,0,0,0]
                 consume_event()
@@ -828,7 +841,8 @@ class LogisticsSim:
             if ac.state == "AT_SPOKEB":
                 j = ac.plan[1]
                 self.arrivals_next[j].append(ac.payload_B[:])
-                self.run_op(j)
+                if is_ops_capable(_row_to_spoke(self.stock[j])):
+                    self.run_op(j)
                 actions_this_period.append((ac.name, f"OFFLOAD@S{j+1}"))
                 ac.payload_B = [0,0,0,0]
                 consume_event()
@@ -885,7 +899,7 @@ class LogisticsSim:
                 actions_this_period.append((ac.name, f"MOVE HUB→S{i+1}"))
                 consume_event(); consume_event()
 
-        # 4) PM consumption
+        # 4) PM_CONSUMPTION
         if self.t % 2 == 1:
             self.day = self.t // 2
             if (self.day % self.A_PERIOD_DAYS) == (self.A_PERIOD_DAYS - 1):
@@ -896,6 +910,10 @@ class LogisticsSim:
                 for s in range(self.M):
                     if self.stock[s][0] > 0 and self.stock[s][1] > 0:
                         self.stock[s][1] = max(0, self.stock[s][1] - 1)
+
+        # recompute operational flags after ops and PM consumption
+        for s in range(self.M):
+            self.op[s] = is_ops_capable(_row_to_spoke(self.stock[s]))
 
         self.check_invariants(pre_stock, ops_before)
         self.actions_log.append(actions_this_period)
@@ -915,17 +933,27 @@ class LogisticsSim:
         return actions_this_period
 
     def ops_count(self) -> int:
-        return sum(1 for x in self.op if x)
+        return sum(self.op)
 
     def check_invariants(self, pre_stock, ops_before):
+        violations: List[str] = []
         for s in range(self.M):
-            assert all(v >= 0 for v in self.stock[s])
+            row = self.stock[s]
+            assert all(v >= -1e-9 for v in row)
+            hud_flag = is_ops_capable(_row_to_spoke(row))
+            node_flag = self.op[s]
+            if hud_flag != node_flag:
+                violations.append(f"ops-cap mismatch at S{s+1}")
             if self.ops_by_spoke[s] > ops_before[s]:
-                assert pre_stock[s][0] > 0 and pre_stock[s][1] > 0 and pre_stock[s][2] > 0 and pre_stock[s][3] > 0
-                delta_c = pre_stock[s][2] - self.stock[s][2]
-                delta_d = pre_stock[s][3] - self.stock[s][3]
+                delta_c = pre_stock[s][2] - row[2]
+                delta_d = pre_stock[s][3] - row[3]
                 delta_ops = self.ops_by_spoke[s] - ops_before[s]
-                assert delta_c >= delta_ops and delta_d >= delta_ops
+                if not (delta_c >= delta_ops - 1e-6 and delta_d >= delta_ops - 1e-6):
+                    violations.append(f"C/D not consumed for ops at S{s+1}")
+        self.integrity_violations = violations
+        if violations and not self._integrity_logged:
+            append_debug(["Integrity violations:"] + violations)
+            self._integrity_logged = True
 
 # ------------------------- Recording Helpers -------------------------
 
@@ -1040,15 +1068,19 @@ class Recorder:
 # ------------------------- Pygame Renderer -------------------------
 
 class Renderer:
-    def __init__(self, sim: LogisticsSim):
+    def __init__(self, sim: LogisticsSim, *, force_windowed: bool = False):
         if not _HAS_PYGAME:
             raise RuntimeError("pygame is required to run the simulator.")
         pygame.init()
         self.flags = pygame.RESIZABLE
-        self.fullscreen = False
+        self.fullscreen = sim.cfg.launch_fullscreen and not force_windowed
         pygame.display.set_caption("CargoSim — Hub–Spoke Logistics")
-        self.width, self.height = 1200, 850
-        self.screen = pygame.display.set_mode((self.width, self.height), self.flags)
+        if self.fullscreen:
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self.width, self.height = self.screen.get_size()
+        else:
+            self.width, self.height = 1200, 850
+            self.screen = pygame.display.set_mode((self.width, self.height), self.flags)
         self.clock = pygame.time.Clock()
         self.sim = sim
 
@@ -1131,6 +1163,7 @@ class Renderer:
         else:
             self.screen = pygame.display.set_mode((1200, 850), self.flags)
             self.width, self.height = 1200, 850
+        self.sim.cfg.launch_fullscreen = self.fullscreen
         self._compute_layout()
 
     def draw_spokes(self):
@@ -1140,11 +1173,10 @@ class Renderer:
         is_cyber = (self.sim.cfg.theme.preset == "Cyber")
         mx, my = pygame.mouse.get_pos()
         for i, (x, y) in enumerate(self.spoke_pos):
-            has_A = self.sim.stock[i][0] > 0
-            has_B = self.sim.stock[i][1] > 0
+            capable = is_ops_capable(_row_to_spoke(self.sim.stock[i]))
             if (mx - x)**2 + (my - y)**2 < 18**2:
                 pygame.draw.circle(self.screen, self.cursor_col, (int(x), int(y)), 12, 2)
-            if is_cyber and not (has_A and has_B):
+            if is_cyber and not capable:
                 t = time.time()
                 pulse = (math.sin(t * math.tau * 1.8) + 1) / 2
                 dark = hex2rgb("#004d19")
@@ -1160,7 +1192,7 @@ class Renderer:
                         pygame.draw.arc(self.screen, color, (int(x - r), int(y - r), r*2, r*2), a1, a2, 2)
                 lbl_col = color
             else:
-                color = self.good_spoke_col if (has_A and has_B) else self.bad_spoke_col
+                color = self.good_spoke_col if capable else self.bad_spoke_col
                 pygame.draw.circle(self.screen, color, (int(x), int(y)), 9)
                 lbl_col = self.white
             if lbl_col == self.white:
@@ -1208,6 +1240,14 @@ class Renderer:
                 drop = (msg, self._text(msg, self.font, self.bad_spoke_col))
                 self._hud_cache["drop"] = drop
             self.screen.blit(drop[1], (20, 40))
+
+        if self.sim.cfg.debug_mode and self.sim.integrity_violations:
+            msg = f"Integrity: {len(self.sim.integrity_violations)}"
+            integ = self._hud_cache.get("integrity")
+            if not integ or integ[0] != msg:
+                integ = (msg, self._text(msg, self.font, self.bad_spoke_col))
+                self._hud_cache["integrity"] = integ
+            self.screen.blit(integ[1], (20, 60))
 
     def draw_aircraft(self, actions_this_period: List[Tuple[str,str]], alpha: float):
         moves_by_ac: Dict[str, List[Tuple[str,str]]] = {}
@@ -1658,9 +1698,10 @@ def render_offline(cfg: SimConfig):
 # ------------------------- Tkinter Control GUI -------------------------
 
 class ControlGUI:
-    def __init__(self, root: tk.Tk, cfg: SimConfig):
+    def __init__(self, root: tk.Tk, cfg: SimConfig, force_windowed: bool = False):
         self.root = root
         self.cfg = cfg
+        self.force_windowed = force_windowed
         root.title("CargoSim — Control Panel")
         root.geometry("860x760")
         root.minsize(760, 640)
@@ -2385,7 +2426,7 @@ class ControlGUI:
                 return
         save_config(self.cfg)
         self.root.destroy()
-        exit_code, live_out = run_sim(self.cfg)
+        exit_code, live_out = run_sim(self.cfg, force_windowed=self.force_windowed)
         if live_out:
             tmp = tk.Tk(); tmp.withdraw()
             messagebox.showinfo("Recording saved", f"Recording written to {live_out}")
@@ -2428,13 +2469,15 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
 
 # ------------------------- Entrypoints & CLI -------------------------
 
-def run_sim(cfg: SimConfig):
+def run_sim(cfg: SimConfig, *, force_windowed: bool = False):
     sim = LogisticsSim(cfg)
-    renderer = Renderer(sim)
+    renderer = Renderer(sim, force_windowed=force_windowed)
     live_out = renderer.run()
+    cfg.launch_fullscreen = renderer.fullscreen
+    save_config(cfg)
     return renderer.exit_code, live_out
 
-def main():
+def main(*, force_windowed: bool = False):
     # dependencies prompt on startup
     tmp = tk.Tk(); tmp.withdraw()
     check_and_offer_installs(tmp)
@@ -2443,7 +2486,7 @@ def main():
     cfg = load_config()
 
     root = tk.Tk()
-    ControlGUI(root, cfg)
+    ControlGUI(root, cfg, force_windowed=force_windowed)
     root.mainloop()
 
 if __name__ == "__main__":
@@ -2454,4 +2497,4 @@ if __name__ == "__main__":
     elif "--theme-sweep" in sys.argv:
         theme_sweep()
     else:
-        main()
+        main(force_windowed="--windowed" in sys.argv)
