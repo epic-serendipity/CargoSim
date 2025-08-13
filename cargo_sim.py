@@ -39,6 +39,21 @@ def _mp4_available() -> tuple[bool, str]:
     except Exception as e:
         return False, f"{e.__class__.__name__}: {e}"
 
+
+def ensure_mp4_ext(path: str) -> str:
+    root, ext = os.path.splitext(path)
+    if ext.lower() != ".mp4":
+        path = path + ".mp4"
+    return path
+
+
+def tmp_mp4_path(final_path: str) -> str:
+    root, ext = os.path.splitext(final_path)
+    if ext.lower() != ".mp4":
+        final_path = final_path + ".mp4"
+        root, ext = os.path.splitext(final_path)
+    return f"{root}.tmp.mp4"
+
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_config.json")
 DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_debug.log")
 CONFIG_VERSION = 6
@@ -993,6 +1008,8 @@ class Recorder:
         self.thread: Optional[threading.Thread] = None
         self.writer = None
         self.out_path: Optional[str] = None
+        self.tmp_path: Optional[str] = None
+        self.final_path: Optional[str] = None
         self.drop_on_backpressure = drop_on_backpressure
 
         if self.live:
@@ -1005,7 +1022,7 @@ class Recorder:
                 ok, why = _mp4_available()
                 if not ok:
                     raise RuntimeError(
-                        "MP4 recording requires imageio-ffmpeg. Install the 'video' extra or switch to PNG frames."
+                        "MP4 recording requires imageio-ffmpeg; install extras: video, or switch to PNG frames."
                         + (f" Details: {why}" if why else "")
                     )
                 self.out_path = os.path.join(folder, f"session_{ts}.mp4")
@@ -1062,26 +1079,27 @@ class Recorder:
     def for_offline(cls, file_path: str, fps: int, fmt: str) -> "Recorder":
         fmt = fmt.lower().strip()
         rec = cls(mode="offline", file_path=file_path, fps=fps, fmt=fmt)
-        file_path = os.path.abspath(file_path)
+        file_path = ensure_mp4_ext(os.path.abspath(file_path)) if fmt == "mp4" else os.path.abspath(file_path)
         if fmt == "mp4":
             ok, why = _mp4_available()
             if not ok:
                 raise RuntimeError(
-                    "MP4 rendering requires imageio-ffmpeg. Install the 'video' extra or switch to PNG frames."
+                    "MP4 rendering requires imageio-ffmpeg; install extras: video, or switch to PNG frames."
                     + (f" Details: {why}" if why else "")
                 )
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            if not file_path.lower().endswith(".mp4"):
-                file_path += ".mp4"
+            tmp_path = tmp_mp4_path(file_path)
             rec.out_path = file_path
-            rec.tmp_path = file_path + ".part"
+            rec.tmp_path = tmp_path
+            rec.final_path = file_path
             rec.writer = imageio.get_writer(
-                rec.tmp_path,
+                tmp_path,
                 format="FFMPEG",
                 fps=fps,
                 codec="libx264",
                 quality=8,
                 macro_block_size=None,
+                pixelformat="yuv420p",
             )  # type: ignore
         elif fmt == "png":
             stem, _ = os.path.splitext(file_path)
@@ -1181,9 +1199,10 @@ class Recorder:
                 if self.writer:
                     self.writer.close()
                 if success:
-                    os.replace(self.tmp_path, self.out_path)
+                    if self.tmp_path and self.final_path:
+                        os.replace(self.tmp_path, self.final_path)
                 else:
-                    if os.path.exists(self.tmp_path):
+                    if self.tmp_path and os.path.exists(self.tmp_path):
                         os.remove(self.tmp_path)
             elif self.fmt == "png":
                 if success:
@@ -1192,7 +1211,7 @@ class Recorder:
                 else:
                     if os.path.isdir(self.frame_dir_tmp):
                         shutil.rmtree(self.frame_dir_tmp, ignore_errors=True)
-            return self.out_path if success else None
+            return (self.final_path if self.fmt == "mp4" else self.out_path) if success else None
 
     def finalize(self):
         return self.close()
@@ -2325,7 +2344,7 @@ class ControlGUI:
         self.record_format_menu = ttk.OptionMenu(frm, self.record_format, self.record_format.get(), *opts)
         self.record_format_menu.grid(row=3, column=1, sticky="w")
         if not mp4_ok:
-            self._add_tip(self.record_format_menu, "MP4 requires imageio-ffmpeg (install the 'video' extra).")
+            self._add_tip(self.record_format_menu, "Install extras: video")
 
         self.async_writer = tk.BooleanVar(value=self.cfg.recording.record_async_writer)
         ttk.Checkbutton(frm, text="Async writer", variable=self.async_writer).grid(row=4, column=0, sticky="w", pady=(6,0))
@@ -2350,7 +2369,7 @@ class ControlGUI:
         self.offline_format_menu = ttk.OptionMenu(frm, self.offline_format, self.offline_format.get(), *off_opts)
         self.offline_format_menu.grid(row=8, column=1, sticky="w")
         if not mp4_ok:
-            self._add_tip(self.offline_format_menu, "MP4 requires imageio-ffmpeg (install the 'video' extra).")
+            self._add_tip(self.offline_format_menu, "Install extras: video")
 
         ttk.Label(frm, text="Offline Output").grid(row=9, column=0, sticky="w", pady=(6,0))
         self.offline_out = ttk.Entry(frm, width=28)
@@ -2377,7 +2396,7 @@ class ControlGUI:
                 return
             ok, _ = _mp4_available()
             if self.cfg.recording.offline_fmt == "mp4" and not ok:
-                messagebox.showerror("MP4 Unavailable", "MP4 requires imageio-ffmpeg (install the 'video' extra).")
+                messagebox.showerror("MP4 Unavailable", "MP4 requires imageio-ffmpeg; install extras: video.")
                 self.offline_format.set("png")
                 self.cfg.recording.offline_fmt = "png"
                 return
@@ -2419,7 +2438,7 @@ class ControlGUI:
 
         # Info label if MP4 disabled
         if not mp4_ok:
-            ttk.Label(frm, text="Tip: install 'imageio-ffmpeg' to enable MP4 output.", foreground="#9ca3af").grid(row=12, column=0, columnspan=3, sticky="w", pady=(6,0))
+            ttk.Label(frm, text="Tip: install extras: video to enable MP4 output.", foreground="#9ca3af").grid(row=12, column=0, columnspan=3, sticky="w", pady=(6,0))
 
         frm.columnconfigure(0, weight=1)
         frm.columnconfigure(1, weight=1)
@@ -2446,7 +2465,7 @@ class ControlGUI:
             self.render_proc.terminate()
             self.render_status.set("Render cancelled")
             self.cancel_render_btn.state(["disabled"])
-            part = self.cfg.recording.offline_output_path + ".part"
+            part = tmp_mp4_path(ensure_mp4_ext(self.cfg.recording.offline_output_path))
             frames_part = os.path.splitext(self.cfg.recording.offline_output_path)[0] + "_frames.part"
             for p in [part, frames_part]:
                 if os.path.isdir(p):
@@ -2640,7 +2659,7 @@ class ControlGUI:
                 messagebox.showerror("Output Folder Required", "Select a valid folder for live recordings before starting.")
                 return
             if self.cfg.recording.record_live_format == "mp4" and not _mp4_available()[0]:
-                messagebox.showerror("MP4 Unavailable", "MP4 requires imageio-ffmpeg (install the 'video' extra).")
+                messagebox.showerror("MP4 Unavailable", "MP4 requires imageio-ffmpeg; install extras: video.")
                 self.record_format.set("png")
                 self.cfg.recording.record_live_format = "png"
                 return
