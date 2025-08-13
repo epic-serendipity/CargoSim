@@ -27,11 +27,22 @@ airframe colors.
   - `per_spoke` shows legacy per-spoke bars.
 - Aircraft glyphs can optionally rotate toward their current destination when
   `orient_aircraft` is enabled. Both interactive and headless renderers share
-  this behavior.
+  this behavior. When parked at the hub, glyphs are forced to face north.
 
 ## Recording paths and offline render
 
 - Live recording is disabled until the user selects an existing output folder.
+- The recording subsystem uses a producer/consumer queue with an optional
+  asynchronous writer thread. When the queue fills, frames may be dropped rather
+  than blocking the GUI. The HUD shows dropped counts.
 - Offline rendering requires an explicit file path; the render button spawns a
-  background process and shows progress with Cancel/Reveal buttons.
+  background process and shows progress with Cancel/Reveal buttons. Polling
+  cadence is configurable.
 - All saved paths are normalized to absolute form in the config file.
+
+## Advanced Decision Making & Gameplay
+
+- `SimConfig.adm` holds fairness cooldowns, target days-of-supply for A/B,
+  an emergency preemption toggle and a deterministic seed.
+- `SimConfig.gameplay` contains realism toggles, leg time radius ranges and
+  fleet optimization weights grouped under the *Gameplay* tab.
