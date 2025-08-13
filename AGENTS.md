@@ -28,5 +28,5 @@
   behaviour controlled by config.
 
 ## Tests
-- `python -m py_compile cargo_sim_with_gui.py`
-- `python cargo_sim_with_gui.py --offline-render` (may fail if pygame missing).
+- `python -m py_compile cargo_sim.py`
+- `python cargo_sim.py --offline-render` (may fail if pygame missing).

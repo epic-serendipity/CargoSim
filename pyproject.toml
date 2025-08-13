@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cargosim"
+dynamic = ["version"]
+description = "Cargo hub-and-spoke simulator"
+authors = [{name = "CargoSim Devs"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pygame>=2.5"]
+
+[project.optional-dependencies]
+video = ["imageio>=2.25", "imageio-ffmpeg>=0.4"]
+dev = ["pytest>=7", "ruff>=0.4", "mypy>=1.8", "types-Pillow", "types-requests"]
+
+[project.scripts]
+cargosim = "cargosim.__main__:main"
+cargosim-headless = "cargosim.__main__:headless"
+
+[tool.hatch.version]
+path = "cargosim/__init__.py"
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
