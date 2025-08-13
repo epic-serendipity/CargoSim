@@ -36,7 +36,7 @@ except Exception:
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_config.json")
 DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_debug.log")
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 
 # ------------------------- Defaults & Model Parameters -------------------------
 
@@ -641,7 +641,7 @@ class LogisticsSim:
         self.day = 0
         self.half = "AM"  # AM for even t, PM for odd t
         self.stock = [[self.cfg.init_A, self.cfg.init_B, self.cfg.init_C, self.cfg.init_D] for _ in range(self.M)]
-        self.op = [False]*self.M  # operational flags (A&B only)
+        self.op = [False]*self.M  # operational flags (A+B+C+D gate)
         self.arrivals_next = [[] for _ in range(self.M)]
         self.pair_cursor = 0
         self.fleet = self.build_fleet(self.cfg.fleet_label)
@@ -654,6 +654,18 @@ class LogisticsSim:
         # History for rewind
         self.history: List[dict] = []
         self.push_snapshot()  # store initial state (period 0 before any action)
+
+    def can_run_op(self, s: int) -> bool:
+        a, b, c, d = self.stock[s]
+        return a > 0 and b > 0 and c > 0 and d > 0
+
+    def run_op(self, s: int, amount: int = 1) -> bool:
+        if not self.can_run_op(s):
+            return False
+        self.stock[s][2] = max(0, self.stock[s][2] - amount)
+        self.stock[s][3] = max(0, self.stock[s][3] - amount)
+        self.ops_by_spoke[s] += 1
+        return True
 
     def build_fleet(self, label: str) -> List[Aircraft]:
         if label == "2xC130":
@@ -747,6 +759,9 @@ class LogisticsSim:
         if self.t >= self.cfg.periods:
             return []
 
+        pre_stock = [row[:] for row in self.stock]
+        ops_before = self.ops_by_spoke[:]
+
         # 1) Apply arrivals
         for s in range(self.M):
             if self.arrivals_next[s]:
@@ -756,9 +771,9 @@ class LogisticsSim:
                 self.arrivals_next[s].clear()
                 for k in range(4): self.stock[s][k] += add[k]
 
-        # 2) Operational if and only if A>0 and B>0
+        # 2) Operational if and only if A,B,C,D>0
         for s in range(self.M):
-            self.op[s] = (self.stock[s][0] > 0 and self.stock[s][1] > 0)
+            self.op[s] = self.can_run_op(s)
 
         stage = self.detect_stage()
         actions_this_period: List[Tuple[str,str]] = []
@@ -791,7 +806,7 @@ class LogisticsSim:
             if ac.state == "AT_SPOKEA":
                 i = ac.plan[0]
                 self.arrivals_next[i].append(ac.payload_A[:])
-                self.ops_by_spoke[i] += 1
+                self.run_op(i)
                 actions_this_period.append((ac.name, f"OFFLOAD@S{i+1}"))
                 ac.payload_A = [0,0,0,0]
                 consume_event()
@@ -813,7 +828,7 @@ class LogisticsSim:
             if ac.state == "AT_SPOKEB":
                 j = ac.plan[1]
                 self.arrivals_next[j].append(ac.payload_B[:])
-                self.ops_by_spoke[j] += 1
+                self.run_op(j)
                 actions_this_period.append((ac.name, f"OFFLOAD@S{j+1}"))
                 ac.payload_B = [0,0,0,0]
                 consume_event()
@@ -873,25 +888,16 @@ class LogisticsSim:
         # 4) PM consumption
         if self.t % 2 == 1:
             self.day = self.t // 2
-            # A
             if (self.day % self.A_PERIOD_DAYS) == (self.A_PERIOD_DAYS - 1):
                 for s in range(self.M):
-                    self.stock[s][0] = max(0, self.stock[s][0] - 1)
-            # B
+                    if self.stock[s][0] > 0 and self.stock[s][1] > 0:
+                        self.stock[s][0] = max(0, self.stock[s][0] - 1)
             if (self.day % self.B_PERIOD_DAYS) == (self.B_PERIOD_DAYS - 1):
                 for s in range(self.M):
-                    self.stock[s][1] = max(0, self.stock[s][1] - 1)
-            # C & D only if op and A,B available
-            mask = [(self.stock[s][0] > 0 and self.stock[s][1] > 0) for s in range(self.M)]
-            if (self.day % self.C_PERIOD_DAYS) == (self.C_PERIOD_DAYS - 1):
-                for s in range(self.M):
-                    if mask[s]:
-                        self.stock[s][2] = max(0, self.stock[s][2] - 1)
-            if (self.day % self.D_PERIOD_DAYS) == (self.D_PERIOD_DAYS - 1):
-                for s in range(self.M):
-                    if mask[s]:
-                        self.stock[s][3] = max(0, self.stock[s][3] - 1)
+                    if self.stock[s][0] > 0 and self.stock[s][1] > 0:
+                        self.stock[s][1] = max(0, self.stock[s][1] - 1)
 
+        self.check_invariants(pre_stock, ops_before)
         self.actions_log.append(actions_this_period)
         self.t += 1
         self.half = "AM" if self.t % 2 == 0 else "PM"
@@ -910,6 +916,16 @@ class LogisticsSim:
 
     def ops_count(self) -> int:
         return sum(1 for x in self.op if x)
+
+    def check_invariants(self, pre_stock, ops_before):
+        for s in range(self.M):
+            assert all(v >= 0 for v in self.stock[s])
+            if self.ops_by_spoke[s] > ops_before[s]:
+                assert pre_stock[s][0] > 0 and pre_stock[s][1] > 0 and pre_stock[s][2] > 0 and pre_stock[s][3] > 0
+                delta_c = pre_stock[s][2] - self.stock[s][2]
+                delta_d = pre_stock[s][3] - self.stock[s][3]
+                delta_ops = self.ops_by_spoke[s] - ops_before[s]
+                assert delta_c >= delta_ops and delta_d >= delta_ops
 
 # ------------------------- Recording Helpers -------------------------
 
@@ -1167,7 +1183,11 @@ class Renderer:
                 self.screen.blit(t, (rect.x + rect.w//2 - t.get_width()//2, rect.y + h + 2))
 
     def draw_hud(self):
-        title = f"{self.sim.cfg.fleet_label} | Period {self.sim.t}/{self.sim.cfg.periods} ({self.sim.half}, Day {self.sim.t//2}) | Ops: {self.sim.ops_count()}"
+        total = self.sim.ops_total_history[-1] if self.sim.ops_total_history else 0
+        prev = self.sim.ops_total_history[-2] if len(self.sim.ops_total_history) > 1 else 0
+        period_ops = total - prev
+        title = (f"{self.sim.cfg.fleet_label} | Period {self.sim.t}/{self.sim.cfg.periods} "
+                 f"({self.sim.half}, Day {self.sim.t//2}) | Ops {period_ops}/{total} • Gate: A+B+C+D")
         surf = self._hud_cache.get("title")
         if not surf or surf[0] != title:
             surf = (title, self._text(title, self.bigfont, self.white))
