@@ -8,7 +8,7 @@ import subprocess
 import threading
 import shutil
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict, Literal
+from typing import List, Tuple, Optional, Dict, Literal, NamedTuple
 from types import SimpleNamespace
 
 # --- Tk first (always available on Win/macOS, may require apt on Linux) ---
@@ -120,6 +120,21 @@ def hex2rgb(h: str):
 
 def blend(a, b, t: float):
     return tuple(int(a[i]*(1-t) + b[i]*t) for i in range(3))
+
+class ThemeTokens(NamedTuple):
+    text: Tuple[int, int, int]
+    muted: Tuple[int, int, int]
+    bg: Tuple[int, int, int]
+    hub: Tuple[int, int, int]
+    good_spoke: Tuple[int, int, int]
+    bad_spoke: Tuple[int, int, int]
+    bar_A: Tuple[int, int, int]
+    bar_B: Tuple[int, int, int]
+    bar_C: Tuple[int, int, int]
+    bar_D: Tuple[int, int, int]
+    panel_bg: Tuple[int, int, int]
+    panel_btn: Tuple[int, int, int]
+    panel_btn_fg: Tuple[int, int, int]
 
 THEME_PRESETS = {
     "GitHub Dark": {
@@ -1300,21 +1315,17 @@ class Renderer:
         self.clock = pygame.time.Clock()
         self.sim = sim
 
-        self._compute_layout(self.width, self.height)
-
-        self.text_cache: Dict[Tuple[str,int,Tuple[int,int,int]], "pygame.Surface"] = {}
         self._hud_cache: Dict[str, Tuple[str, "pygame.Surface"]] = {}
+        self._pm_rects = {}
+        self._last_heading_by_ac: Dict[str, float] = {}
+        self.debug_lines: List[str] = []
 
         self._apply_theme()
+        self._compute_layout(self.width, self.height)
+        self._build_fonts(self.height)
+        self._compose_static()
 
-        self.period_seconds = float(self.sim.cfg.period_seconds)
-        self.paused = False
-        self.debug_overlay = bool(self.sim.cfg.debug_mode)
-        self.show_safe_area = False
-        self.exit_code = None  # "GUI" to return to control panel
-        self.menu_open = False
-
-        self.debug_lines: List[str] = []
+        self.cursor_col = hex2rgb(CURSOR_COLORS.get(self.sim.cfg.cursor_color, CURSOR_COLORS["Cobalt"]))
 
         rcfg = self.sim.cfg.recording
         ok, _ = _mp4_available()
@@ -1333,39 +1344,50 @@ class Renderer:
         else:
             self.recorder = NullRecorder()
 
-        # Pause menu button rects
-        self._pm_rects = {}
-        self._last_heading_by_ac: Dict[str, float] = {}
-
-        self.cursor_col = hex2rgb(CURSOR_COLORS.get(self.sim.cfg.cursor_color, CURSOR_COLORS["Cobalt"]))
+        self.period_seconds = float(self.sim.cfg.period_seconds)
+        self.paused = False
+        self.debug_overlay = bool(self.sim.cfg.debug_mode)
+        self.show_safe_area = False
+        self.exit_code = None  # "GUI" to return to control panel
+        self.menu_open = False
 
     def _apply_theme(self):
         t = self.sim.cfg.theme
-        self.bg = hex2rgb(t.game_bg)
-        self.white = hex2rgb(t.game_fg)
-        self.grey = hex2rgb(t.game_muted)
-        self.hub_color = hex2rgb(t.hub_color)
-        self.good_spoke_col = hex2rgb(t.good_spoke)
-        self.bad_spoke_col = hex2rgb(t.bad_spoke)
+        bg = hex2rgb(t.game_bg)
+        text = hex2rgb(t.game_fg)
+        muted = hex2rgb(t.game_muted)
+        hub = hex2rgb(t.hub_color)
+        good = hex2rgb(t.good_spoke)
+        bad = hex2rgb(t.bad_spoke)
+        self.tt = ThemeTokens(
+            text=text,
+            muted=muted,
+            bg=bg,
+            hub=hub,
+            good_spoke=good,
+            bad_spoke=bad,
+            bar_A=hex2rgb(t.bar_A),
+            bar_B=hex2rgb(t.bar_B),
+            bar_C=hex2rgb(t.bar_C),
+            bar_D=hex2rgb(t.bar_D),
+            panel_bg=blend(bg, hub, 0.3),
+            panel_btn=blend(bg, hub, 0.5),
+            panel_btn_fg=text,
+        )
         self.ac_colors = {k: hex2rgb(v) for k, v in t.ac_colors.items()}
-        self.bar_cols = [hex2rgb(t.bar_A), hex2rgb(t.bar_B), hex2rgb(t.bar_C), hex2rgb(t.bar_D)]
-        self.panel_bg = blend(self.bg, self.hub_color, 0.3)
-        self.panel_btn = blend(self.bg, self.hub_color, 0.5)
-        self.panel_btn_fg = self.white
-        self.overlay_backdrop_rgba = (*self.bg, 160)
-        # rebuild static text using new colors
-        self.hub_text = self._text("HUB", self.bigfont, self.white)
-        self.spoke_text = [self._text(f"S{i+1}", self.font, self.white) for i in range(M)]
-        self.bar_letter_surfs = [self._text(ch, self.font, self.grey) for ch in ["A","B","C","D"]]
+        self.bar_cols = [self.tt.bar_A, self.tt.bar_B, self.tt.bar_C, self.tt.bar_D]
+        self.overlay_backdrop_rgba = (*self.tt.bg, 160)
+        if hasattr(self, "bigfont"):
+            self._compose_static()
+            self._hud_cache = {}
 
-    def _text(self, text: str, font, color: Tuple[int,int,int]):
-        key = (text, id(font), color)
-        surf = self.text_cache.get(key)
-        if surf is None:
-            raw = font.render(text, True, color)
-            disp = pygame.display.get_surface()
-            surf = raw.convert_alpha() if disp is not None else raw
-            self.text_cache[key] = surf
+    def _text(self, text: str, font, color: Tuple[int, int, int]):
+        surf = font.render(text, True, color)
+        if pygame.display.get_surface() is not None:
+            try:
+                return surf.convert_alpha()
+            except pygame.error:
+                return surf
         return surf
 
     def _compute_layout(self, width: int, height: int):
@@ -1397,18 +1419,29 @@ class Renderer:
             self.spoke_pos.append((x, y))
             self.bar_bases.append((int(x) + 14, int(y) + 16))
 
-        # Font sizing based on height
+        for r in (self.rect_left, self.rect_right, self.rect_map):
+            if r.width <= 0 or r.height <= 0:
+                raise ValueError("layout rectangle collapsed")
+
+    def _build_fonts(self, height: int):
         big_sz = clamp(round(height * 0.028), 16, 36)
         small_sz = clamp(round(height * 0.018), 12, 20)
         self.font = pygame.font.SysFont("consolas", small_sz)
         self.bigfont = pygame.font.SysFont("consolas", big_sz, bold=True)
-        self.hub_text = self._text("HUB", self.bigfont, self.white)
-        self.spoke_text = [self._text(f"S{i+1}", self.font, self.white) for i in range(M)]
-        self.bar_letter_surfs = [self._text(ch, self.font, self.grey) for ch in ["A","B","C","D"]]
 
-        for r in (self.rect_left, self.rect_right, self.rect_map):
-            if r.width <= 0 or r.height <= 0:
-                raise ValueError("layout rectangle collapsed")
+    def _compose_static(self):
+        assert hasattr(self, "bigfont")
+        assert hasattr(self, "tt")
+        self.hub_text = self._text("HUB", self.bigfont, self.tt.text)
+        self.spoke_text = [self._text(f"S{i+1}", self.font, self.tt.text) for i in range(M)]
+        self.bar_letter_surfs = [self._text(ch, self.font, self.tt.muted) for ch in ["A", "B", "C", "D"]]
+
+    def _init_display_headless_safe(self):
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        if not pygame.display.get_init():
+            pygame.display.init()
+        pygame.font.init()
+        pygame.display.set_mode((1, 1), flags=pygame.HIDDEN)
 
     def _toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
@@ -1426,10 +1459,12 @@ class Renderer:
             self._compute_layout(w, h)
         except ValueError:
             self._compute_layout(1920, 1080)
+        self._build_fonts(self.height)
+        self._compose_static()
         self._hud_cache = {}
 
     def draw_spokes(self):
-        pygame.draw.circle(self.screen, self.hub_color, (self.cx, self.cy), 10)
+        pygame.draw.circle(self.screen, self.tt.hub, (self.cx, self.cy), 10)
         self.screen.blit(self.hub_text, (self.cx - self.hub_text.get_width()//2, self.cy - 30))
 
         is_cyber = (self.sim.cfg.theme.preset == "Cyber")
@@ -1442,7 +1477,7 @@ class Renderer:
                 t = time.time()
                 pulse = (math.sin(t * math.tau * 1.8) + 1) / 2
                 dark = hex2rgb("#004d19")
-                color = blend(dark, self.good_spoke_col, pulse)
+                color = blend(dark, self.tt.good_spoke, pulse)
                 pygame.draw.circle(self.screen, color, (int(x), int(y)), 9)
                 r = 14
                 segs = 12
@@ -1454,10 +1489,10 @@ class Renderer:
                         pygame.draw.arc(self.screen, color, (int(x - r), int(y - r), r*2, r*2), a1, a2, 2)
                 lbl_col = color
             else:
-                color = self.good_spoke_col if capable else self.bad_spoke_col
+                color = self.tt.good_spoke if capable else self.tt.bad_spoke
                 pygame.draw.circle(self.screen, color, (int(x), int(y)), 9)
-                lbl_col = self.white
-            if lbl_col == self.white:
+                lbl_col = self.tt.text
+            if lbl_col == self.tt.text:
                 label = self.spoke_text[i]
             else:
                 label = self._text(f"S{i+1}", self.font, lbl_col)
@@ -1491,14 +1526,14 @@ class Renderer:
                  f"({self.sim.half}, Day {self.sim.t//2}) | Ops {period_ops}/{total} • Gate: A+B+C+D")
         surf = self._hud_cache.get("title")
         if not surf or surf[0] != title:
-            surf = (title, self._text(title, self.bigfont, self.white))
+            surf = (title, self._text(title, self.bigfont, self.tt.text))
             self._hud_cache["title"] = surf
         self.screen.blit(surf[1], (self.pad, self.pad))
 
         help1 = self._hud_cache.get("help")
         if not help1:
             text = "SPACE pause | ←/→ step | +/− speed | D debug | F11 fullscreen | M minimize | G menu | R reset | ESC"
-            help1 = (text, self._text(text, self.font, self.grey))
+            help1 = (text, self._text(text, self.font, self.tt.muted))
             self._hud_cache["help"] = help1
         self.screen.blit(help1[1], (self.pad, self.height - self.pad - help1[1].get_height()))
 
@@ -1506,7 +1541,7 @@ class Renderer:
             msg = f"Dropped frames: {self.recorder.frames_dropped}"
             drop = self._hud_cache.get("drop")
             if not drop or drop[0] != msg:
-                drop = (msg, self._text(msg, self.font, self.bad_spoke_col))
+                drop = (msg, self._text(msg, self.font, self.tt.bad_spoke))
                 self._hud_cache["drop"] = drop
             self.screen.blit(drop[1], (self.pad, self.pad + 24))
 
@@ -1514,7 +1549,7 @@ class Renderer:
             msg = f"Integrity: {len(self.sim.integrity_violations)}"
             integ = self._hud_cache.get("integrity")
             if not integ or integ[0] != msg:
-                integ = (msg, self._text(msg, self.font, self.bad_spoke_col))
+                integ = (msg, self._text(msg, self.font, self.tt.bad_spoke))
                 self._hud_cache["integrity"] = integ
             self.screen.blit(integ[1], (self.pad, self.pad + 44))
 
@@ -1535,7 +1570,7 @@ class Renderer:
 
         for ac in self.sim.fleet:
             segs = moves_by_ac.get(ac.name, [])
-            col = self.ac_colors.get(ac.typ, self.white)
+            col = self.ac_colors.get(ac.typ, self.tt.text)
             angle = self._last_heading_by_ac.get(ac.name, -math.pi/2)
             if not segs:
                 if ac.location == "HUB":
@@ -1582,7 +1617,7 @@ class Renderer:
         pygame.draw.polygon(self.screen, color, pts)
         show_lbl = self.sim.cfg.show_aircraft_labels or (self.recorder.live and self.sim.cfg.recording.include_labels)
         if show_lbl:
-            t = self.font.render(name, True, self.white)
+            t = self.font.render(name, True, self.tt.text)
             self.screen.blit(t, (x - t.get_width()//2, y - size - 16))
 
     def draw_debug_overlay(self):
@@ -1596,7 +1631,7 @@ class Renderer:
         lines = self.debug_lines[-18:]
         y = y0 + 8
         for ln in lines:
-            t = self.font.render(ln, True, self.white)
+            t = self.font.render(ln, True, self.tt.text)
             self.screen.blit(t, (x0 + 10, y))
             y += 18
 
@@ -1614,17 +1649,18 @@ class Renderer:
             y += txt.get_height() + 4
         if rc.show_timestamp:
             ts = f"t={self.sim.t} ({self.sim.half}, day {self.sim.t//2})"
-            t_surf = self.font.render(ts, True, self.white)
+            t_surf = self.font.render(ts, True, self.tt.text)
             self.screen.blit(t_surf, (self.width - t_surf.get_width() - 20, y))
             y += t_surf.get_height() + 4
         if rc.show_frame_index:
             fi = f"frame {self.recorder.frame_idx}";
-            f_surf = self.font.render(fi, True, self.white)
+            f_surf = self.font.render(fi, True, self.tt.text)
             self.screen.blit(f_surf, (self.width - f_surf.get_width() - 20, y))
 
     def render_frame(self, actions: List[Tuple[str, str]], alpha: float, with_overlays: bool = True):
+        assert hasattr(self, "tt")
         rc = self.sim.cfg.recording
-        self.screen.fill(self.bg)
+        self.screen.fill(self.tt.bg)
         self.draw_spokes()
         self.draw_bars()
         if with_overlays and ((not self.recorder.live) or rc.include_hud):
@@ -1635,9 +1671,9 @@ class Renderer:
         if with_overlays and self.debug_overlay and ((not self.recorder.live) or rc.include_debug):
             self.draw_debug_overlay()
         if self.show_safe_area:
-            pygame.draw.rect(self.screen, self.grey, self.rect_left, 1)
-            pygame.draw.rect(self.screen, self.grey, self.rect_map, 1)
-            pygame.draw.rect(self.screen, self.grey, self.rect_right, 1)
+            pygame.draw.rect(self.screen, self.tt.muted, self.rect_left, 1)
+            pygame.draw.rect(self.screen, self.tt.muted, self.rect_map, 1)
+            pygame.draw.rect(self.screen, self.tt.muted, self.rect_right, 1)
         if with_overlays:
             self.draw_recording_overlays()
         return self.screen
@@ -1646,8 +1682,8 @@ class Renderer:
         if not self.fullscreen:
             return
         pad = self.pad
-        pygame.draw.rect(self.screen, self.panel_bg, self.rect_left)
-        pygame.draw.rect(self.screen, self.panel_bg, self.rect_right)
+        pygame.draw.rect(self.screen, self.tt.panel_bg, self.rect_left)
+        pygame.draw.rect(self.screen, self.tt.panel_bg, self.rect_right)
         left_inner = self.left_inner
         right_inner = self.right_inner
 
@@ -1655,7 +1691,7 @@ class Renderer:
         ops = self.sim.ops_count()
         max_ops = self.sim.M
         label_txt = ellipsize(f"Operational: {ops}", self.font, left_inner.width)
-        label = self._text(label_txt, self.font, self.white)
+        label = self._text(label_txt, self.font, self.tt.text)
         assert label.get_width() <= left_inner.width
         label_y = self.rect_left.top - int(pad * 0.6)
         if label_y < pad:
@@ -1665,11 +1701,11 @@ class Renderer:
         bar_h = int(left_inner.height * 0.25)
         bar_x = left_inner.x
         bar_y = left_inner.y + self.font.get_height() + int(pad * 0.5)
-        pygame.draw.rect(self.screen, self.panel_btn, (bar_x, bar_y, 24, bar_h), border_radius=6)
+        pygame.draw.rect(self.screen, self.tt.panel_btn, (bar_x, bar_y, 24, bar_h), border_radius=6)
         fill_h = int(bar_h * (ops / max_ops if max_ops else 1))
         pygame.draw.rect(
             self.screen,
-            self.good_spoke_col,
+            self.tt.good_spoke,
             (bar_x, bar_y + (bar_h - fill_h), 24, fill_h),
             border_radius=6,
         )
@@ -1686,15 +1722,15 @@ class Renderer:
             x = bar_x + k * (barw + gap)
             y = bars_area_y + (self.height * 0.25 - h)
             pygame.draw.rect(
-                self.screen, self.panel_btn, (x, bars_area_y, barw, int(self.height * 0.25)), border_radius=6
+                self.screen, self.tt.panel_btn, (x, bars_area_y, barw, int(self.height * 0.25)), border_radius=6
             )
             pygame.draw.rect(
                 self.screen, self.bar_cols[k], (x, y, barw, h), border_radius=6
             )
-            lbl = self.font.render(["A", "B", "C", "D"][k], True, self.white)
+            lbl = self.font.render(["A", "B", "C", "D"][k], True, self.tt.text)
             self.screen.blit(lbl, (x + 4 - lbl.get_width() // 2 + 6, bars_area_y - 22))
             val_str = f"{val:.1f}" if isinstance(val, float) else str(val)
-            vtxt = self.font.render(val_str, True, self.grey)
+            vtxt = self.font.render(val_str, True, self.tt.muted)
             self.screen.blit(vtxt, (x - vtxt.get_width() // 2 + 12, y - 18))
 
         # Right panel modes
@@ -1705,19 +1741,19 @@ class Renderer:
         if mode == "ops_total_number":
             total = self.sim.ops_total_history[-1] if self.sim.ops_total_history else 0
             title_txt = ellipsize("Total Ops", self.font, panel_w)
-            title = self._text(title_txt, self.font, self.white)
+            title = self._text(title_txt, self.font, self.tt.text)
             assert title.get_width() <= panel_w
             self.screen.blit(title, (rx + (panel_w - title.get_width()) // 2, base_y))
-            num = self.bigfont.render(str(total), True, self.white)
+            num = self.bigfont.render(str(total), True, self.tt.text)
             self.screen.blit(num, (rx + (panel_w - num.get_width()) // 2, base_y + 40))
         elif mode == "ops_total_sparkline":
             hist = self.sim.ops_total_history
             lbl_txt = ellipsize("Total Ops", self.font, panel_w)
-            lbl = self._text(lbl_txt, self.font, self.white)
+            lbl = self._text(lbl_txt, self.font, self.tt.text)
             assert lbl.get_width() <= panel_w
             self.screen.blit(lbl, (rx + (panel_w - lbl.get_width()) // 2, base_y))
             rect = pygame.Rect(rx, base_y + lbl.get_height() + int(pad * 0.5), panel_w, 120)
-            pygame.draw.rect(self.screen, self.panel_bg, rect, border_radius=6)
+            pygame.draw.rect(self.screen, self.tt.panel_bg, rect, border_radius=6)
             N = min(120, len(hist))
             if N >= 2:
                 tail = hist[-N:]
@@ -1730,9 +1766,9 @@ class Renderer:
                     x = rect.left + i * step
                     y = rect.bottom - (val / max_val) * rect.height
                     pts.append((x, y))
-                pygame.draw.lines(self.screen, self.white, False, pts, 2)
+                pygame.draw.lines(self.screen, self.tt.text, False, pts, 2)
             val_txt = ellipsize(f"Total Ops: {hist[-1] if hist else 0}", self.font, panel_w)
-            v_surf = self._text(val_txt, self.font, self.white)
+            v_surf = self._text(val_txt, self.font, self.tt.text)
             assert v_surf.get_width() <= panel_w
             self.screen.blit(v_surf, (rx, rect.bottom - v_surf.get_height() - int(pad * 0.3)))
         else:
@@ -1741,10 +1777,10 @@ class Renderer:
             row_h = 24
             for i in range(self.sim.M):
                 y = base_y + i * row_h
-                pygame.draw.rect(self.screen, self.panel_btn, (rx, y, panel_w, 12), border_radius=6)
+                pygame.draw.rect(self.screen, self.tt.panel_btn, (rx, y, panel_w, 12), border_radius=6)
                 w = int(panel_w * (ops_counts[i] / max_ops_spoke))
-                pygame.draw.rect(self.screen, self.good_spoke_col, (rx, y, w, 12), border_radius=6)
-                lbl = self.font.render(f"S{i+1}", True, self.white)
+                pygame.draw.rect(self.screen, self.tt.good_spoke, (rx, y, w, 12), border_radius=6)
+                lbl = self.font.render(f"S{i+1}", True, self.tt.text)
                 self.screen.blit(lbl, (rx, y - 18))
 
     # --- Pause Menu ---
@@ -1757,8 +1793,8 @@ class Renderer:
         box_w, box_h = 420, 280
         bx = (self.width - box_w)//2
         by = (self.height - box_h)//2
-        pygame.draw.rect(self.screen, self.panel_bg, (bx,by,box_w,box_h), border_radius=12)
-        title = self.bigfont.render("Paused", True, self.white)
+        pygame.draw.rect(self.screen, self.tt.panel_bg, (bx,by,box_w,box_h), border_radius=12)
+        title = self.bigfont.render("Paused", True, self.tt.text)
         self.screen.blit(title, (bx + (box_w - title.get_width())//2, by + 16))
 
         # buttons
@@ -1771,8 +1807,8 @@ class Renderer:
         yy = by + 72
         for text, key in labels:
             rect = pygame.Rect(bx+40, yy, box_w-80, 44)
-            pygame.draw.rect(self.screen, self.panel_btn, rect, border_radius=8)
-            t = self.font.render(text, True, self.panel_btn_fg)
+            pygame.draw.rect(self.screen, self.tt.panel_btn, rect, border_radius=8)
+            t = self.font.render(text, True, self.tt.panel_btn_fg)
             self.screen.blit(t, (rect.x + (rect.w - t.get_width())//2, rect.y + (rect.h - t.get_height())//2))
             self._pm_rects[key] = rect
             yy += 56
@@ -1835,6 +1871,8 @@ class Renderer:
                     except ValueError:
                         w, h = pygame.display.get_surface().get_size()
                         self._compute_layout(w, h)
+                    self._build_fonts(self.height)
+                    self._compose_static()
                     self._hud_cache = {}
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
@@ -1954,27 +1992,24 @@ def render_offline(cfg: SimConfig):
     # Build sim and a faux renderer that draws onto our surface without display
     class Headless(Renderer):
         def __init__(self, sim, width, height):
-            os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-            if not pygame.display.get_init():
-                pygame.display.init()
-            pygame.display.set_mode((1, 1), flags=pygame.HIDDEN)
             self.sim = sim
             self.width, self.height = width, height
+            self._init_display_headless_safe()
             self.screen = pygame.Surface((width, height), flags=pygame.SRCALPHA)
             self.clock = None
 
             self.fullscreen = False
             self.flags = 0
 
-            pygame.font.init()
+            self._hud_cache = {}
+            self._apply_theme()
             try:
                 self._compute_layout(width, height)
             except ValueError:
                 self._compute_layout(1920, 1080)
+            self._build_fonts(self.height)
+            self._compose_static()
 
-            self.text_cache = {}
-            self._hud_cache = {}
-            self._apply_theme()
             self.cursor_col = hex2rgb(CURSOR_COLORS.get(self.sim.cfg.cursor_color, CURSOR_COLORS["Cobalt"]))
 
             self.period_seconds = float(self.sim.cfg.period_seconds)
