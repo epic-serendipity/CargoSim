@@ -58,9 +58,9 @@ VIS_CAPS_DFLT = (6, 2, 4, 4)  # used for relative bar heights
 def _row_to_spoke(row: List[float]) -> SimpleNamespace:
     return SimpleNamespace(A=row[0], B=row[1], C=row[2], D=row[3])
 
-def is_ops_capable(spoke, *, epsilon=1e-9) -> bool:
+def is_ops_capable(spoke, eps=1e-9) -> bool:
     # Must reflect ONLY inventory available **now**, not in-flight or next-period arrivals.
-    return (spoke.A > epsilon and spoke.B > epsilon and spoke.C > epsilon and spoke.D > epsilon)
+    return (spoke.A > eps and spoke.B > eps and spoke.C > eps and spoke.D > eps)
 
 # ------------------------- Theme Presets & Color Maps -------------------------
 
@@ -1076,7 +1076,7 @@ class Renderer:
         self.fullscreen = sim.cfg.launch_fullscreen and not force_windowed
         pygame.display.set_caption("CargoSim — Hub–Spoke Logistics")
         if self.fullscreen:
-            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
             self.width, self.height = self.screen.get_size()
         else:
             self.width, self.height = 1200, 850
@@ -1137,7 +1137,9 @@ class Renderer:
         key = (text, id(font), color)
         surf = self.text_cache.get(key)
         if surf is None:
-            surf = font.render(text, True, color).convert_alpha()
+            raw = font.render(text, True, color)
+            disp = pygame.display.get_surface()
+            surf = raw.convert_alpha() if disp is not None else raw
             self.text_cache[key] = surf
         return surf
 
@@ -1158,12 +1160,13 @@ class Renderer:
     def _toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
         if self.fullscreen:
-            self.screen = pygame.display.set_mode((0,0), pygame.FULLSCREEN)
+            self.screen = pygame.display.set_mode((0,0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
             self.width, self.height = self.screen.get_size()
         else:
             self.screen = pygame.display.set_mode((1200, 850), self.flags)
             self.width, self.height = 1200, 850
         self.sim.cfg.launch_fullscreen = self.fullscreen
+        save_config(self.sim.cfg)
         self._compute_layout()
 
     def draw_spokes(self):
@@ -1450,10 +1453,11 @@ class Renderer:
         self.screen.blit(title, (bx + (box_w - title.get_width())//2, by + 16))
 
         # buttons
-        labels = [("Resume", "resume"),
-                  ("Record Offline", "offline"),
-                  ("Main Menu", "menu"),
-                  ("Exit", "exit")]
+        labels = [("Resume", "resume")]
+        labels.append(("Windowed", "windowed") if self.fullscreen else ("Fullscreen", "fullscreen"))
+        labels += [("Record Offline", "offline"),
+                   ("Main Menu", "menu"),
+                   ("Exit", "exit")]
         self._pm_rects.clear()
         yy = by + 72
         for text, key in labels:
@@ -1470,6 +1474,12 @@ class Renderer:
                 if key == "resume":
                     self.menu_open = False
                     self.paused = False
+                elif key == "windowed":
+                    if self.fullscreen:
+                        self._toggle_fullscreen()
+                elif key == "fullscreen":
+                    if not self.fullscreen:
+                        self._toggle_fullscreen()
                 elif key == "offline":
                     # spawn a separate process to render offline video from saved config
                     try:
@@ -1623,15 +1633,18 @@ def render_offline(cfg: SimConfig):
     import pygame as pg
     pg.init()
     w, h = 1200, 850
-    screen = pg.Surface((w,h))
 
     # Build sim and a faux renderer that draws onto our surface without display
     class Headless(Renderer):
         def __init__(self, sim):
-            # do not call display.set_mode (bypass parent __init__)
+            os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+            if not pygame.display.get_init():
+                pygame.display.init()
+            pygame.display.set_mode((1, 1), flags=pygame.HIDDEN)
+            # do not call display.set_mode for main surface
             self.sim = sim
             self.width, self.height = w, h
-            self.screen = screen
+            self.screen = pygame.Surface((self.width, self.height), flags=pygame.SRCALPHA)
             self.clock = None
 
             # ensure attributes used by _compute_layout / draw paths exist
@@ -1676,17 +1689,17 @@ def render_offline(cfg: SimConfig):
         actions = sim.actions_log[-1] if sim.actions_log else []
         for f in range(frames_per_period):
             alpha = (f + 1) / frames_per_period
-            screen.fill(rnd.bg)
+            rnd.screen.fill(rnd.bg)
             rnd.draw_spokes()
             rnd.draw_bars()
             rnd.draw_hud()
             rnd.draw_aircraft(actions, alpha)
             if write_mp4:
-                arr = pg.surfarray.array3d(screen).swapaxes(0,1)
+                arr = pg.surfarray.array3d(rnd.screen).swapaxes(0,1)
                 writer.append_data(arr)  # type: ignore
             else:
                 frame_file = os.path.join(out_dir, f"frame_{frame_idx:06d}.png")
-                pg.image.save(screen, frame_file)
+                pg.image.save(rnd.screen, frame_file)
             frame_idx += 1
         sim.step_period()
 
