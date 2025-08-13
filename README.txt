@@ -5,6 +5,15 @@ CargoSim — Control GUI + Visualizer (Themed, Recording, Offline Render)
 Run:
     python cargo_sim_with_gui.py
 
+Highlights
+---------
+- **Themes:** ten distinct presets with derived tokens; Cyber is pure green on
+  jet black.
+- **Recording Overlays:** presets plus optional statistics for live and offline
+  captures.
+- **Seconds/Period:** slider now ranges from 2.00 s down to 0.05 s with a live
+  numeric readout.
+
 Themes and Recording
 --------------------
 The **Theme** tab offers ten presets (Classic Light/Dark, Cyber, GitHub

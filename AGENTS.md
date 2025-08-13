@@ -8,6 +8,11 @@
 - Never override a user's selected airframe color map (`ac_colors`).
 - Renderer derives `panel_bg`, `panel_btn`, `panel_btn_fg` and
   `overlay_backdrop_rgba` from `game_bg` + `hub_color`; avoid hardcoded greys.
+- Cyber theme must use only green on black; bad spokes pulse with a dashed ring.
+
+## Overlay stats
+- When adding recording overlay stats, draw them in both interactive and
+  headless renderers.
 
 ## Coding
 - Follow existing snake_case style and keep functions compact.

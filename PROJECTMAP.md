@@ -11,6 +11,8 @@ Core theme tokens are stored in `ThemeConfig`:
 At runtime the renderer derives:
 - `panel_bg`, `panel_btn`, `panel_btn_fg`
 - `overlay_backdrop_rgba`
+from core tokens using a shared `hex_to_rgb` and `blend(a,b,t)` helper so all
+surfaces stay on theme.
 
 Both the interactive `Renderer` and offline `Headless` renderer compute and use
 these values so offline frames match the on‑screen simulation.
@@ -26,8 +28,9 @@ airframe colors.
   - `ops_total_sparkline` plots a sparkline of recent totals.
   - `per_spoke` shows legacy per-spoke bars.
 - Aircraft glyphs can optionally rotate toward their current destination when
-  `orient_aircraft` is enabled. Both interactive and headless renderers share
-  this behavior. When parked at the hub, glyphs are forced to face north.
+  `orient_aircraft` is enabled. On departure from the hub the heading smoothly
+  interpolates from north to the leg heading over the first ~15 % of the
+  segment. When parked at the hub, glyphs are forced to face north.
 
 ## Recording paths and offline render
 
@@ -39,6 +42,9 @@ airframe colors.
   background process and shows progress with Cancel/Reveal buttons. Polling
   cadence is configurable.
 - All saved paths are normalized to absolute form in the config file.
+The overlay pipeline is: HUD/overlays are drawn onto the Pygame surface → the
+resulting frame is scaled if requested → the writer thread/process encodes the
+frame to MP4 or PNG.
 
 ## Advanced Decision Making & Gameplay
 
