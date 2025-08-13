@@ -9,6 +9,12 @@
 - Renderer derives `panel_bg`, `panel_btn`, `panel_btn_fg` and
   `overlay_backdrop_rgba` from `game_bg` + `hub_color`; avoid hardcoded greys.
 - Cyber theme must use only green on black; bad spokes pulse with a dashed ring.
+- New presets must not introduce hardcoded colors elsewhere; always reuse theme
+  tokens.
+
+## Cursor color menu
+- UI shows only color names; hex codes live in `CURSOR_COLORS`.
+- Exactly five options are supported; no greys or neutrals.
 
 ## Overlay stats
 - When adding recording overlay stats, draw them in both interactive and
