@@ -16,9 +16,18 @@ theme.
 
 Recording requires explicit destinations. The **Recording** tab lets you select
 a folder for live captures and a file path for offline renders; recording will
-refuse to start until these paths are set. Live sessions write PNG frames or
-`session.mp4` (if `imageio` + `imageio-ffmpeg` are installed). Offline renders
-now run in a background process with a progress strip and a "Cancel" button.
+refuse to start until these paths are set. Live sessions write `session_*.mp4`
+or PNG frames using an asynchronous producer/consumer queue. If the queue
+fills, frames are dropped rather than blocking the UI and the HUD shows
+"REC n (dropped=x)". Offline renders run in a background process with progress
+and a *Cancel* button.
+
+Advanced Decision Making & Gameplay
+-----------------------------------
+The **Scheduling** tab now includes an *Advanced Decision Making* group for
+tuning routing behavior (fairness cooldowns, target days-of-supply and a
+deterministic seed). A new **Gameplay** tab exposes toggles for *Realism* and
+*Fleet Optimization* features with adjustable weights.
 
 Right Panel Views
 -----------------
@@ -30,7 +39,7 @@ Aircraft Heading
 ----------------
 Enable *Orient Aircraft Toward Destination* on the **Visualization** tab to
 rotate aircraft icons toward their current destination. Disable it to keep all
-triangles upright.
+triangles upright. While parked at the hub, aircraft always face due north.
 
 Below this are *Recording Overlays* controls for what appears in live
 recordings: HUD, debug overlay, fullscreen panels, REC watermark, timestamps,

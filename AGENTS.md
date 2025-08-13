@@ -8,3 +8,14 @@
 - Never override a user's selected airframe color map (`ac_colors`).
 - Renderer derives `panel_bg`, `panel_btn`, `panel_btn_fg` and
   `overlay_backdrop_rgba` from `game_bg` + `hub_color`; avoid hardcoded greys.
+
+## Coding
+- Follow existing snake_case style and keep functions compact.
+- Persist new `SimConfig` fields via `to_json` / `from_json` and bump
+  `CONFIG_VERSION` when changing schema.
+- Prefer non-blocking design for recording; respect queue limits and dropping
+  behaviour controlled by config.
+
+## Tests
+- `python -m py_compile cargo_sim_with_gui.py`
+- `python cargo_sim_with_gui.py --offline-render` (may fail if pygame missing).

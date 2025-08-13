@@ -5,6 +5,7 @@ import math
 import copy
 import time
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
 
@@ -35,6 +36,7 @@ except Exception:
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_config.json")
 DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_debug.log")
+CONFIG_VERSION = 2
 
 # ------------------------- Defaults & Model Parameters -------------------------
 
@@ -298,10 +300,15 @@ class ThemeConfig:
 
 @dataclass
 class RecordingConfig:
-    record_live: bool = False
-    record_format: str = "PNG frames"  # "PNG frames" | "MP4"
-    live_out_dir: str = ""
-    offline_out_file: str = ""
+    record_live_enabled: bool = False
+    record_live_folder: str = ""
+    record_live_format: str = "mp4"  # "mp4" | "png"
+    record_async_writer: bool = True
+    record_max_queue: int = 64
+    record_skip_on_backpressure: bool = True
+    offline_output_path: str = ""
+    offline_progress_poll_ms: int = 400
+    # legacy / common options
     fps: int = 30
     frames_per_period: int = 10
     include_hud: bool = True
@@ -315,10 +322,14 @@ class RecordingConfig:
 
     def to_json(self) -> dict:
         return {
-            "record_live": self.record_live,
-            "record_format": self.record_format,
-            "live_out_dir": self.live_out_dir,
-            "offline_out_file": self.offline_out_file,
+            "record_live_enabled": self.record_live_enabled,
+            "record_live_folder": self.record_live_folder,
+            "record_live_format": self.record_live_format,
+            "record_async_writer": self.record_async_writer,
+            "record_max_queue": self.record_max_queue,
+            "record_skip_on_backpressure": self.record_skip_on_backpressure,
+            "offline_output_path": self.offline_output_path,
+            "offline_progress_poll_ms": self.offline_progress_poll_ms,
             "fps": self.fps,
             "frames_per_period": self.frames_per_period,
             "include_hud": self.include_hud,
@@ -334,10 +345,16 @@ class RecordingConfig:
     @staticmethod
     def from_json(d: dict) -> "RecordingConfig":
         r = RecordingConfig()
-        r.record_live = bool(d.get("record_live", r.record_live))
-        r.record_format = d.get("record_format", r.record_format)
-        r.live_out_dir = os.path.abspath(d.get("live_out_dir", r.live_out_dir)) if d.get("live_out_dir") else ""
-        r.offline_out_file = os.path.abspath(d.get("offline_out_file", r.offline_out_file)) if d.get("offline_out_file") else ""
+        r.record_live_enabled = bool(d.get("record_live_enabled", d.get("record_live", r.record_live_enabled)))
+        r.record_live_format = d.get("record_live_format", d.get("record_format", r.record_live_format))
+        live_dir = d.get("record_live_folder", d.get("live_out_dir", r.record_live_folder))
+        r.record_live_folder = os.path.abspath(live_dir) if live_dir else ""
+        off = d.get("offline_output_path", d.get("offline_out_file", r.offline_output_path))
+        r.offline_output_path = os.path.abspath(off) if off else ""
+        r.record_async_writer = bool(d.get("record_async_writer", r.record_async_writer))
+        r.record_max_queue = int(d.get("record_max_queue", r.record_max_queue))
+        r.record_skip_on_backpressure = bool(d.get("record_skip_on_backpressure", r.record_skip_on_backpressure))
+        r.offline_progress_poll_ms = int(d.get("offline_progress_poll_ms", r.offline_progress_poll_ms))
         r.fps = int(d.get("fps", r.fps))
         r.frames_per_period = int(d.get("frames_per_period", r.frames_per_period))
         r.include_hud = bool(d.get("include_hud", r.include_hud))
@@ -351,7 +368,83 @@ class RecordingConfig:
         return r
 
 @dataclass
+class AdvancedDecisionConfig:
+    adm_enable: bool = False
+    adm_fairness_cooldown_periods: int = 2
+    adm_target_dos_A_days: float = 3.0
+    adm_target_dos_B_days: float = 2.0
+    adm_enable_emergency_A_preempt: bool = True
+    adm_seed: int = 12345
+
+    def to_json(self) -> dict:
+        return {
+            "adm_enable": self.adm_enable,
+            "adm_fairness_cooldown_periods": self.adm_fairness_cooldown_periods,
+            "adm_target_dos_A_days": self.adm_target_dos_A_days,
+            "adm_target_dos_B_days": self.adm_target_dos_B_days,
+            "adm_enable_emergency_A_preempt": self.adm_enable_emergency_A_preempt,
+            "adm_seed": self.adm_seed,
+        }
+
+    @staticmethod
+    def from_json(d: dict) -> "AdvancedDecisionConfig":
+        a = AdvancedDecisionConfig()
+        a.adm_enable = bool(d.get("adm_enable", a.adm_enable))
+        a.adm_fairness_cooldown_periods = int(d.get("adm_fairness_cooldown_periods", a.adm_fairness_cooldown_periods))
+        a.adm_target_dos_A_days = float(d.get("adm_target_dos_A_days", a.adm_target_dos_A_days))
+        a.adm_target_dos_B_days = float(d.get("adm_target_dos_B_days", a.adm_target_dos_B_days))
+        a.adm_enable_emergency_A_preempt = bool(d.get("adm_enable_emergency_A_preempt", a.adm_enable_emergency_A_preempt))
+        a.adm_seed = int(d.get("adm_seed", a.adm_seed))
+        return a
+
+
+@dataclass
+class GameplayConfig:
+    gp_realism_enable: bool = False
+    gp_legtime_distance_model: bool = True
+    gp_legtime_radius_min: float = 0.7
+    gp_legtime_radius_max: float = 1.6
+    gp_legtime_spread_seed: int = 777
+    gp_fleetopt_enable: bool = False
+    gp_fleetopt_weights: Dict[str, float] = field(default_factory=lambda: {
+        "wA": 2.0,
+        "wB": 1.2,
+        "wDOS": 1.0,
+        "wOps": 1.5,
+        "wDist": 0.6,
+        "wCooldown": 0.8,
+    })
+
+    def to_json(self) -> dict:
+        return {
+            "gp_realism_enable": self.gp_realism_enable,
+            "gp_legtime_distance_model": self.gp_legtime_distance_model,
+            "gp_legtime_radius_min": self.gp_legtime_radius_min,
+            "gp_legtime_radius_max": self.gp_legtime_radius_max,
+            "gp_legtime_spread_seed": self.gp_legtime_spread_seed,
+            "gp_fleetopt_enable": self.gp_fleetopt_enable,
+            "gp_fleetopt_weights": self.gp_fleetopt_weights,
+        }
+
+    @staticmethod
+    def from_json(d: dict) -> "GameplayConfig":
+        g = GameplayConfig()
+        g.gp_realism_enable = bool(d.get("gp_realism_enable", g.gp_realism_enable))
+        g.gp_legtime_distance_model = bool(d.get("gp_legtime_distance_model", g.gp_legtime_distance_model))
+        g.gp_legtime_radius_min = float(d.get("gp_legtime_radius_min", g.gp_legtime_radius_min))
+        g.gp_legtime_radius_max = float(d.get("gp_legtime_radius_max", g.gp_legtime_radius_max))
+        g.gp_legtime_spread_seed = int(d.get("gp_legtime_spread_seed", g.gp_legtime_spread_seed))
+        g.gp_fleetopt_enable = bool(d.get("gp_fleetopt_enable", g.gp_fleetopt_enable))
+        weights = d.get("gp_fleetopt_weights", g.gp_fleetopt_weights)
+        for k, v in g.gp_fleetopt_weights.items():
+            weights.setdefault(k, v)
+        g.gp_fleetopt_weights = {k: float(weights.get(k, v)) for k, v in g.gp_fleetopt_weights.items()}
+        return g
+
+
+@dataclass
 class SimConfig:
+    config_version: int = CONFIG_VERSION
     fleet_label: str = "2xC130"       # "2xC130", "4xC130", "2xC130_2xC27"
     periods: int = 60                 # 30 days (AM/PM)
     init_A: int = 4
@@ -374,11 +467,16 @@ class SimConfig:
     stats_mode: str = "total"         # "total" | "average"
     right_panel_view: str = "ops_total_number"  # "ops_total_number"|"ops_total_sparkline"|"per_spoke"
     orient_aircraft: bool = True
+    show_dos_tooltips: bool = True
+    hud_show_churn: bool = True
     theme: ThemeConfig = field(default_factory=ThemeConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
+    adm: AdvancedDecisionConfig = field(default_factory=AdvancedDecisionConfig)
+    gameplay: GameplayConfig = field(default_factory=GameplayConfig)
 
     def to_json(self) -> dict:
         return {
+            "config_version": self.config_version,
             "fleet_label": self.fleet_label,
             "periods": self.periods,
             "init": [self.init_A, self.init_B, self.init_C, self.init_D],
@@ -393,13 +491,18 @@ class SimConfig:
             "stats_mode": self.stats_mode,
             "right_panel_view": self.right_panel_view,
             "orient_aircraft": self.orient_aircraft,
+            "show_dos_tooltips": self.show_dos_tooltips,
+            "hud_show_churn": self.hud_show_churn,
             "theme": self.theme.to_json(),
             "recording": self.recording.to_json(),
+            "adm": self.adm.to_json(),
+            "gameplay": self.gameplay.to_json(),
         }
 
     @staticmethod
     def from_json(d: dict) -> "SimConfig":
         cfg = SimConfig()
+        cfg.config_version = int(d.get("config_version", cfg.config_version))
         cfg.fleet_label = d.get("fleet_label", cfg.fleet_label)
         cfg.periods = int(d.get("periods", cfg.periods))
         init = d.get("init", [cfg.init_A, cfg.init_B, cfg.init_C, cfg.init_D])
@@ -420,8 +523,12 @@ class SimConfig:
         cfg.stats_mode = d.get("stats_mode", cfg.stats_mode)
         cfg.right_panel_view = d.get("right_panel_view", cfg.right_panel_view)
         cfg.orient_aircraft = bool(d.get("orient_aircraft", cfg.orient_aircraft))
+        cfg.show_dos_tooltips = bool(d.get("show_dos_tooltips", cfg.show_dos_tooltips))
+        cfg.hud_show_churn = bool(d.get("hud_show_churn", cfg.hud_show_churn))
         cfg.theme = ThemeConfig.from_json(d.get("theme", {}))
         cfg.recording = RecordingConfig.from_json(d.get("recording", {}))
+        cfg.adm = AdvancedDecisionConfig.from_json(d.get("adm", {}))
+        cfg.gameplay = GameplayConfig.from_json(d.get("gameplay", {}))
         return cfg
 
 def load_config() -> SimConfig:
@@ -430,6 +537,9 @@ def load_config() -> SimConfig:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             cfg = SimConfig.from_json(data)
+            if cfg.config_version < CONFIG_VERSION:
+                cfg.config_version = CONFIG_VERSION
+                save_config(cfg)
             if cfg.theme.theme_version < CURRENT_THEME_VERSION or cfg.theme.ac_colorset is None:
                 apply_theme_preset(cfg.theme, cfg.theme.preset)
             else:
@@ -819,44 +929,112 @@ class LogisticsSim:
 # ------------------------- Recording Helpers -------------------------
 
 class Recorder:
-    def __init__(self, live: bool, out_dir: str, fps: int, fmt: str, scale: int = 100):
-        self.live = live
-        self.out_dir = os.path.abspath(out_dir) if out_dir else ""
-        self.fps = fps
-        self.fmt = fmt
-        self.scale = scale
+    def __init__(self, cfg: RecordingConfig, period_seconds: float):
+        self.cfg = cfg
+        self.live = cfg.record_live_enabled
+        self.period_seconds = period_seconds
         self.frame_idx = 0
-        if live and self.out_dir:
-            os.makedirs(self.out_dir, exist_ok=True)
+        self.frames_dropped = 0
+        self.queue: Optional["queue.Queue"] = None
+        self.thread: Optional[threading.Thread] = None
+        self.writer = None
+        self.out_path: Optional[str] = None
+        if not self.live:
+            return
+        os.makedirs(cfg.record_live_folder, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        if cfg.record_live_format.lower() == "mp4" and _HAS_IMAGEIO:
+            self.out_path = os.path.join(cfg.record_live_folder, f"session_{ts}.mp4")
+            if cfg.record_async_writer:
+                import queue
+                self.queue = queue.Queue(maxsize=cfg.record_max_queue)
+                self.thread = threading.Thread(target=self._worker_mp4, daemon=True)
+                self.thread.start()
+            else:
+                self.writer = imageio.get_writer(self.out_path, fps=cfg.fps, codec="libx264", quality=8)  # type: ignore
+        else:
+            self.frame_dir = os.path.join(cfg.record_live_folder, "frames", f"session_{ts}")
+            os.makedirs(self.frame_dir, exist_ok=True)
+            self.out_path = self.frame_dir
+            if cfg.record_async_writer:
+                import queue
+                self.queue = queue.Queue(maxsize=cfg.record_max_queue)
+                self.thread = threading.Thread(target=self._worker_png, daemon=True)
+                self.thread.start()
+
+    def _enqueue(self, arr):
+        if not self.queue:
+            self._write_frame(arr)
+            return
+        try:
+            self.queue.put_nowait(arr)
+        except Exception:
+            if self.cfg.record_skip_on_backpressure:
+                self.frames_dropped += 1
+            else:
+                try:
+                    self.queue.put(arr, timeout=0.005)
+                except Exception:
+                    self.frames_dropped += 1
 
     def capture(self, surface):
-        if not self.live or not self.out_dir:
+        if not self.live:
             return
         surf = surface
-        if self.scale != 100:
-            w = int(surface.get_width() * self.scale / 100)
-            h = int(surface.get_height() * self.scale / 100)
+        if self.cfg.scale_percent != 100:
+            w = int(surface.get_width() * self.cfg.scale_percent / 100)
+            h = int(surface.get_height() * self.cfg.scale_percent / 100)
             surf = pygame.transform.smoothscale(surface, (w, h))
-        path = os.path.join(self.out_dir, f"frame_{self.frame_idx:06d}.png")
-        pygame.image.save(surf, path)
+        arr = pygame.surfarray.array3d(surf).swapaxes(0,1)
+        self._enqueue(arr)
         self.frame_idx += 1
+
+    def _write_frame(self, arr):
+        if self.cfg.record_live_format.lower() == "mp4" and _HAS_IMAGEIO:
+            if not self.writer:
+                self.writer = imageio.get_writer(self.out_path, fps=self.cfg.fps, codec="libx264", quality=8)  # type: ignore
+            self.writer.append_data(arr)  # type: ignore
+        else:
+            import imageio
+            path = os.path.join(self.frame_dir, f"frame_{self.frame_idx:06d}.png")
+            imageio.imwrite(path, arr)  # type: ignore
+
+    def _worker_mp4(self):
+        import queue
+        writer = imageio.get_writer(self.out_path, fps=self.cfg.fps, codec="libx264", quality=8)  # type: ignore
+        while True:
+            try:
+                arr = self.queue.get()
+            except queue.Empty:
+                continue
+            if arr is None:
+                break
+            writer.append_data(arr)  # type: ignore
+        writer.close()
+
+    def _worker_png(self):
+        import queue, imageio
+        idx = 0
+        while True:
+            try:
+                arr = self.queue.get()
+            except queue.Empty:
+                continue
+            if arr is None:
+                break
+            path = os.path.join(self.frame_dir, f"frame_{idx:06d}.png")
+            imageio.imwrite(path, arr)  # type: ignore
+            idx += 1
 
     def finalize(self):
         if not self.live:
             return None
-        if self.fmt == "MP4" and _HAS_IMAGEIO and self.frame_idx > 0 and self.out_dir:
-            mp4_path = os.path.join(self.out_dir, "session.mp4")
-            writer = imageio.get_writer(mp4_path, fps=self.fps, codec="libx264", quality=8)  # type: ignore
-            for i in range(self.frame_idx):
-                frame_path = os.path.join(self.out_dir, f"frame_{i:06d}.png")
-                try:
-                    img = imageio.imread(frame_path)  # type: ignore
-                    writer.append_data(img)
-                except Exception:
-                    pass
-            writer.close()
-            return mp4_path
-        return None
+        if self.queue and self.thread:
+            self.queue.put(None)
+            self.thread.join(timeout=5)
+        elif self.writer:
+            self.writer.close()
+        return self.out_path
 
 # ------------------------- Pygame Renderer -------------------------
 
@@ -908,14 +1086,10 @@ class Renderer:
         self.debug_lines: List[str] = []
 
         rcfg = self.sim.cfg.recording
-        fmt = "MP4" if (rcfg.record_format == "MP4" and _HAS_IMAGEIO) else "PNG frames"
-        if rcfg.record_live and rcfg.record_format == "MP4" and not _HAS_IMAGEIO:
+        fmt = "mp4" if (rcfg.record_live_format.lower() == "mp4" and _HAS_IMAGEIO) else "png"
+        if rcfg.record_live_enabled and rcfg.record_live_format.lower() == "mp4" and not _HAS_IMAGEIO:
             self.debug_lines.append("MP4 requires imageio + imageio-ffmpeg; recording PNG frames instead.")
-        self.recorder = Recorder(live=rcfg.record_live,
-                                 out_dir=rcfg.live_out_dir,
-                                 fps=rcfg.fps,
-                                 fmt=fmt,
-                                 scale=rcfg.scale_percent)
+        self.recorder = Recorder(rcfg, self.period_seconds)
 
         # Pause menu button rects
         self._pm_rects = {}
@@ -1001,7 +1175,11 @@ class Renderer:
             col = self.ac_colors.get(ac.typ, self.white)
             angle = self._last_heading_by_ac.get(ac.name, -math.pi/2)
             if not segs:
-                pos = (self.cx, self.cy) if ac.location == "HUB" else self.spoke_pos[int(ac.location[1:])-1]
+                if ac.location == "HUB":
+                    pos = (self.cx, self.cy)
+                    angle = -math.pi/2
+                else:
+                    pos = self.spoke_pos[int(ac.location[1:])-1]
             else:
                 if alpha <= 0.5 and len(segs) >= 1:
                     s = segs[0]
@@ -1060,7 +1238,10 @@ class Renderer:
         rc = self.sim.cfg.recording
         y = 16
         if rc.show_watermark:
-            txt = self.bigfont.render("REC", True, (255,0,0))
+            msg = f"REC {self.recorder.frame_idx}"
+            if self.recorder.frames_dropped:
+                msg += f" (dropped={self.recorder.frames_dropped})"
+            txt = self.bigfont.render(msg, True, (255,0,0))
             self.screen.blit(txt, (self.width - txt.get_width() - 20, y))
             y += txt.get_height() + 4
         if rc.show_timestamp:
@@ -1193,7 +1374,7 @@ class Renderer:
                 elif key == "offline":
                     # spawn a separate process to render offline video from saved config
                     try:
-                        if not self.sim.cfg.recording.offline_out_file:
+                        if not self.sim.cfg.recording.offline_output_path:
                             self.debug_lines.append("Set offline output path in Control Panel before rendering.")
                         else:
                             save_config(self.sim.cfg)
@@ -1402,11 +1583,11 @@ def render_offline(cfg: SimConfig):
     total_frames = cfg.periods * frames_per_period
 
     # writer
-    write_mp4 = (_HAS_IMAGEIO and rc.offline_out_file.lower().endswith(".mp4"))
+    write_mp4 = (_HAS_IMAGEIO and rc.offline_output_path.lower().endswith(".mp4"))
     if write_mp4:
-        writer = imageio.get_writer(rc.offline_out_file, fps=rc.fps, codec="libx264", quality=8)  # type: ignore
+        writer = imageio.get_writer(rc.offline_output_path, fps=rc.fps, codec="libx264", quality=8)  # type: ignore
     else:
-        out_dir = os.path.splitext(rc.offline_out_file)[0] + "_frames"
+        out_dir = os.path.splitext(rc.offline_output_path)[0] + "_frames"
         os.makedirs(out_dir, exist_ok=True)
 
     frame_idx = 0
@@ -1431,7 +1612,7 @@ def render_offline(cfg: SimConfig):
     if write_mp4:
         writer.close()
     pg.quit()
-    return rc.offline_out_file if write_mp4 else out_dir
+    return rc.offline_output_path if write_mp4 else out_dir
 
 # ------------------------- Tkinter Control GUI -------------------------
 
@@ -1453,6 +1634,7 @@ class ControlGUI:
         self.tab_consumption = ttk.Frame(nb, padding=12, style="Card.TFrame")
         self.tab_schedule = ttk.Frame(nb, padding=12, style="Card.TFrame")
         self.tab_visual = ttk.Frame(nb, padding=12, style="Card.TFrame")
+        self.tab_gameplay = ttk.Frame(nb, padding=12, style="Card.TFrame")
         self.tab_theme = ttk.Frame(nb, padding=12, style="Card.TFrame")
         self.tab_record = ttk.Frame(nb, padding=12, style="Card.TFrame")
         self.tab_start = ttk.Frame(nb, padding=12, style="Card.TFrame")
@@ -1462,6 +1644,7 @@ class ControlGUI:
         nb.add(self.tab_consumption, text=" Consumption ")
         nb.add(self.tab_schedule, text=" Scheduling ")
         nb.add(self.tab_visual, text=" Visualization ")
+        nb.add(self.tab_gameplay, text=" Gameplay ")
         nb.add(self.tab_theme, text=" Theme ")
         nb.add(self.tab_record, text=" Recording ")
         nb.add(self.tab_start, text=" Save / Start ")
@@ -1472,6 +1655,7 @@ class ControlGUI:
         self.build_schedule_tab(self.tab_schedule)
         self.build_visual_tab(self.tab_visual)
         self.build_theme_tab(self.tab_theme)
+        self.build_gameplay_tab(self.tab_gameplay)
         self.build_record_tab(self.tab_record)
         self.build_start_tab(self.tab_start)
 
@@ -1680,8 +1864,64 @@ class ControlGUI:
         ttk.Label(frm, text="Planner priority", foreground="#9ca3af").grid(row=2, column=0, sticky="w")
         ttk.Label(frm, text="A-first, then B, else C/D (fixed)", foreground="#9ca3af").grid(row=2, column=1, sticky="w")
 
+        ttk.Separator(frm).grid(row=3, column=0, columnspan=2, sticky="we", pady=8)
+        adm = ttk.LabelFrame(frm, text="Advanced Decision Making")
+        adm.grid(row=4, column=0, columnspan=2, sticky="we")
+        self.adm_enable = tk.BooleanVar(value=self.cfg.adm.adm_enable)
+        ttk.Checkbutton(adm, text="Enable", variable=self.adm_enable).grid(row=0, column=0, sticky="w")
+        ttk.Label(adm, text="Fairness cooldown").grid(row=1, column=0, sticky="w")
+        self.adm_cooldown = tk.IntVar(value=self.cfg.adm.adm_fairness_cooldown_periods)
+        ttk.Spinbox(adm, from_=0, to=10, textvariable=self.adm_cooldown, width=5).grid(row=1, column=1, sticky="w")
+        ttk.Label(adm, text="Target DOS A").grid(row=2, column=0, sticky="w")
+        self.adm_dos_A = tk.DoubleVar(value=self.cfg.adm.adm_target_dos_A_days)
+        ttk.Entry(adm, textvariable=self.adm_dos_A, width=6).grid(row=2, column=1, sticky="w")
+        ttk.Label(adm, text="Target DOS B").grid(row=3, column=0, sticky="w")
+        self.adm_dos_B = tk.DoubleVar(value=self.cfg.adm.adm_target_dos_B_days)
+        ttk.Entry(adm, textvariable=self.adm_dos_B, width=6).grid(row=3, column=1, sticky="w")
+        self.adm_emerg = tk.BooleanVar(value=self.cfg.adm.adm_enable_emergency_A_preempt)
+        ttk.Checkbutton(adm, text="Emergency A preempt", variable=self.adm_emerg).grid(row=4, column=0, sticky="w")
+        ttk.Label(adm, text="Seed").grid(row=5, column=0, sticky="w")
+        self.adm_seed = tk.IntVar(value=self.cfg.adm.adm_seed)
+        ttk.Entry(adm, textvariable=self.adm_seed, width=8).grid(row=5, column=1, sticky="w")
+        adm.columnconfigure(1, weight=1)
+
         frm.columnconfigure(0, weight=1)
         frm.columnconfigure(1, weight=1)
+
+    def build_gameplay_tab(self, tab):
+        frm = ttk.Frame(tab, style="Card.TFrame")
+        frm.pack(fill="both", expand=True)
+
+        realism = ttk.LabelFrame(frm, text="Realism")
+        realism.grid(row=0, column=0, sticky="we")
+        self.gp_realism_enable = tk.BooleanVar(value=self.cfg.gameplay.gp_realism_enable)
+        ttk.Checkbutton(realism, text="Enable realism tweaks", variable=self.gp_realism_enable).grid(row=0, column=0, sticky="w")
+        self.gp_legtime_distance_model = tk.BooleanVar(value=self.cfg.gameplay.gp_legtime_distance_model)
+        ttk.Checkbutton(realism, text="Distance-based leg times", variable=self.gp_legtime_distance_model).grid(row=1, column=0, sticky="w")
+        ttk.Label(realism, text="Radius min / max").grid(row=2, column=0, sticky="w")
+        self.gp_radius_min = tk.DoubleVar(value=self.cfg.gameplay.gp_legtime_radius_min)
+        self.gp_radius_max = tk.DoubleVar(value=self.cfg.gameplay.gp_legtime_radius_max)
+        ttk.Entry(realism, textvariable=self.gp_radius_min, width=6).grid(row=2, column=1, sticky="w")
+        ttk.Entry(realism, textvariable=self.gp_radius_max, width=6).grid(row=2, column=2, sticky="w")
+        ttk.Label(realism, text="Spread seed").grid(row=3, column=0, sticky="w")
+        self.gp_spread_seed = tk.IntVar(value=self.cfg.gameplay.gp_legtime_spread_seed)
+        ttk.Entry(realism, textvariable=self.gp_spread_seed, width=6).grid(row=3, column=1, sticky="w")
+        realism.columnconfigure(0, weight=1)
+
+        fleet = ttk.LabelFrame(frm, text="Fleet Optimization")
+        fleet.grid(row=1, column=0, sticky="we", pady=(8,0))
+        self.gp_fleetopt_enable = tk.BooleanVar(value=self.cfg.gameplay.gp_fleetopt_enable)
+        ttk.Checkbutton(fleet, text="Enable fleet optimization", variable=self.gp_fleetopt_enable).grid(row=0, column=0, sticky="w")
+        self.gp_weight_vars = {}
+        row = 1
+        for k, v in self.cfg.gameplay.gp_fleetopt_weights.items():
+            ttk.Label(fleet, text=k).grid(row=row, column=0, sticky="w")
+            var = tk.DoubleVar(value=v)
+            ttk.Entry(fleet, textvariable=var, width=6).grid(row=row, column=1, sticky="w")
+            self.gp_weight_vars[k] = var
+            row += 1
+        fleet.columnconfigure(0, weight=1)
+        frm.columnconfigure(0, weight=1)
 
     def build_visual_tab(self, tab):
         frm = ttk.Frame(tab, style="Card.TFrame")
@@ -1772,36 +2012,43 @@ class ControlGUI:
         frm = ttk.Frame(tab, style="Card.TFrame")
         frm.pack(fill="both", expand=True)
 
-        self.record_live = tk.BooleanVar(value=self.cfg.recording.record_live)
+        self.record_live = tk.BooleanVar(value=self.cfg.recording.record_live_enabled)
         ttk.Checkbutton(frm, text="Record Live Session", variable=self.record_live).grid(row=0, column=0, sticky="w")
 
-        ttk.Label(frm, text="Record Format").grid(row=1, column=0, sticky="w", pady=(6,0))
-        # MP4 only enabled if imageio available
-        opts = ["PNG frames"] + (["MP4"] if _HAS_IMAGEIO else [])
-        self.record_format = tk.StringVar(value=(self.cfg.recording.record_format if self.cfg.recording.record_format in opts else "PNG frames"))
-        self.record_format_menu = ttk.OptionMenu(frm, self.record_format, self.record_format.get(), *opts)
-        self.record_format_menu.grid(row=1, column=1, sticky="w")
-
-        ttk.Label(frm, text="Live Output Folder").grid(row=2, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Live Output Folder").grid(row=1, column=0, sticky="w", pady=(6,0))
         self.live_out_dir = ttk.Entry(frm, width=28)
-        self.live_out_dir.insert(0, self.cfg.recording.live_out_dir)
-        self.live_out_dir.grid(row=2, column=1, sticky="w")
+        self.live_out_dir.insert(0, self.cfg.recording.record_live_folder)
+        self.live_out_dir.grid(row=1, column=1, sticky="w")
         def pick_live_dir():
             d = filedialog.askdirectory(title="Select Output Folder", initialdir=os.path.abspath(self.live_out_dir.get() or "."))
             if d:
                 self.live_out_dir.delete(0, tk.END); self.live_out_dir.insert(0, os.path.abspath(d))
-        ttk.Button(frm, text="Browse…", command=pick_live_dir).grid(row=2, column=2, sticky="w", padx=6)
+        ttk.Button(frm, text="Browse…", command=pick_live_dir).grid(row=1, column=2, sticky="w", padx=6)
 
-        self.fps_var, _, _, row3 = self._scale_with_entry(frm, "FPS", 10, 60, "int", self.cfg.recording.fps)
-        row3.grid(row=3, column=0, columnspan=3, sticky="we", pady=(6,0))
+        ttk.Label(frm, text="Live Format").grid(row=2, column=0, sticky="w", pady=(6,0))
+        opts = ["png"] + (["mp4"] if _HAS_IMAGEIO else [])
+        self.record_format = tk.StringVar(value=(self.cfg.recording.record_live_format if self.cfg.recording.record_live_format in opts else "png"))
+        self.record_format_menu = ttk.OptionMenu(frm, self.record_format, self.record_format.get(), *opts)
+        self.record_format_menu.grid(row=2, column=1, sticky="w")
 
-        self.fpp_var, _, _, row4 = self._scale_with_entry(frm, "Frames per Period (offline)", 1, 60, "int", self.cfg.recording.frames_per_period)
-        row4.grid(row=4, column=0, columnspan=3, sticky="we", pady=(6,0))
+        self.async_writer = tk.BooleanVar(value=self.cfg.recording.record_async_writer)
+        ttk.Checkbutton(frm, text="Async writer", variable=self.async_writer).grid(row=3, column=0, sticky="w", pady=(6,0))
+        ttk.Label(frm, text="Max Queue").grid(row=3, column=1, sticky="w")
+        self.queue_var = tk.IntVar(value=self.cfg.recording.record_max_queue)
+        ttk.Spinbox(frm, from_=1, to=256, textvariable=self.queue_var, width=5).grid(row=3, column=2, sticky="w")
+        self.drop_var = tk.BooleanVar(value=self.cfg.recording.record_skip_on_backpressure)
+        ttk.Checkbutton(frm, text="Drop on backpressure", variable=self.drop_var).grid(row=4, column=0, columnspan=2, sticky="w")
 
-        ttk.Label(frm, text="Offline Output").grid(row=5, column=0, sticky="w", pady=(6,0))
+        self.fps_var, _, _, row5 = self._scale_with_entry(frm, "FPS", 10, 60, "int", self.cfg.recording.fps)
+        row5.grid(row=5, column=0, columnspan=3, sticky="we", pady=(6,0))
+
+        self.fpp_var, _, _, row6 = self._scale_with_entry(frm, "Frames per Period (offline)", 1, 60, "int", self.cfg.recording.frames_per_period)
+        row6.grid(row=6, column=0, columnspan=3, sticky="we", pady=(6,0))
+
+        ttk.Label(frm, text="Offline Output").grid(row=7, column=0, sticky="w", pady=(6,0))
         self.offline_out = ttk.Entry(frm, width=28)
-        self.offline_out.insert(0, self.cfg.recording.offline_out_file)
-        self.offline_out.grid(row=5, column=1, sticky="w")
+        self.offline_out.insert(0, self.cfg.recording.offline_output_path)
+        self.offline_out.grid(row=7, column=1, sticky="w")
         def pick_offline_out():
             path = filedialog.asksaveasfilename(title="Select Offline Output File",
                                                 defaultextension=".mp4",
@@ -1809,7 +2056,7 @@ class ControlGUI:
                                                 filetypes=[("MP4 Video","*.mp4"),("All Files","*.*")])
             if path:
                 self.offline_out.delete(0, tk.END); self.offline_out.insert(0, os.path.abspath(path))
-        ttk.Button(frm, text="Browse…", command=pick_offline_out).grid(row=5, column=2, sticky="w", padx=6)
+        ttk.Button(frm, text="Browse…", command=pick_offline_out).grid(row=7, column=2, sticky="w", padx=6)
 
         def do_offline_render():
             if not self._read_back_to_cfg():
@@ -1817,10 +2064,10 @@ class ControlGUI:
             if not _HAS_PYGAME:
                 messagebox.showerror("Missing Dependency", "pygame is required for offline rendering.")
                 return
-            if not self.cfg.recording.offline_out_file:
+            if not self.cfg.recording.offline_output_path:
                 messagebox.showerror("Output Required", "Select an offline output file before rendering.")
                 return
-            out_dir = os.path.dirname(self.cfg.recording.offline_out_file) or "."
+            out_dir = os.path.dirname(self.cfg.recording.offline_output_path) or "."
             if not os.path.isdir(out_dir):
                 messagebox.showerror("Invalid Path", "Offline output directory does not exist.")
                 return
@@ -1828,7 +2075,7 @@ class ControlGUI:
             try:
                 self.render_proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--offline-render"],
                                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                self.render_status.set(f"Rendering… writing to {self.cfg.recording.offline_out_file}")
+                self.render_status.set(f"Rendering… writing to {self.cfg.recording.offline_output_path}")
                 self.cancel_render_btn.state(["!disabled"])
                 self.reveal_render_btn.state(["disabled"])
                 self._poll_render_proc()
@@ -1836,10 +2083,10 @@ class ControlGUI:
                 messagebox.showerror("Offline Render Failed", str(e))
         self.render_proc = None
         self.offline_btn = ttk.Button(frm, text="Render Offline Video Now", style="Accent.TButton", command=do_offline_render)
-        self.offline_btn.grid(row=6, column=0, columnspan=3, sticky="we", pady=(12,0))
+        self.offline_btn.grid(row=8, column=0, columnspan=3, sticky="we", pady=(12,0))
 
         progress = ttk.Frame(frm, style="Card.TFrame")
-        progress.grid(row=7, column=0, columnspan=3, sticky="we", pady=(6,0))
+        progress.grid(row=9, column=0, columnspan=3, sticky="we", pady=(6,0))
         self.render_status = tk.StringVar(value="")
         ttk.Label(progress, textvariable=self.render_status).pack(side="left")
         self.cancel_render_btn = ttk.Button(progress, text="Cancel", command=self.cancel_render, state="disabled")
@@ -1849,7 +2096,7 @@ class ControlGUI:
 
         # Info label if MP4 disabled
         if not _HAS_IMAGEIO:
-            ttk.Label(frm, text="Tip: install 'imageio' + 'imageio-ffmpeg' to enable MP4 output.", foreground="#9ca3af").grid(row=8, column=0, columnspan=3, sticky="w", pady=(6,0))
+            ttk.Label(frm, text="Tip: install 'imageio' + 'imageio-ffmpeg' to enable MP4 output.", foreground="#9ca3af").grid(row=10, column=0, columnspan=3, sticky="w", pady=(6,0))
 
         frm.columnconfigure(0, weight=1)
         frm.columnconfigure(1, weight=1)
@@ -1859,11 +2106,11 @@ class ControlGUI:
             return
         ret = self.render_proc.poll()
         if ret is None:
-            self.root.after(400, self._poll_render_proc)
+            self.root.after(self.cfg.recording.offline_progress_poll_ms, self._poll_render_proc)
         else:
             out, err = self.render_proc.communicate()
             if ret == 0:
-                self.render_status.set(f"Complete: {self.cfg.recording.offline_out_file}")
+                self.render_status.set(f"Complete: {self.cfg.recording.offline_output_path}")
                 self.reveal_render_btn.state(["!disabled"])
             else:
                 self.render_status.set("Render failed")
@@ -1879,7 +2126,7 @@ class ControlGUI:
             self.render_proc = None
 
     def reveal_render(self):
-        path = self.cfg.recording.offline_out_file
+        path = self.cfg.recording.offline_output_path
         if not path:
             return
         folder = os.path.dirname(path)
@@ -1963,14 +2210,17 @@ class ControlGUI:
 
         # Recording
         rc = self.cfg.recording
-        rc.record_live = bool(self.record_live.get())
-        rc.record_format = self.record_format.get()
+        rc.record_live_enabled = bool(self.record_live.get())
+        rc.record_live_format = self.record_format.get()
         live_dir = self.live_out_dir.get().strip()
-        rc.live_out_dir = os.path.abspath(live_dir) if live_dir else ""
+        rc.record_live_folder = os.path.abspath(live_dir) if live_dir else ""
+        rc.record_async_writer = bool(self.async_writer.get())
+        rc.record_max_queue = int(self.queue_var.get())
+        rc.record_skip_on_backpressure = bool(self.drop_var.get())
         rc.fps = int(self.fps_var.get())
         rc.frames_per_period = int(self.fpp_var.get())
         offline = self.offline_out.get().strip()
-        rc.offline_out_file = os.path.abspath(offline) if offline else ""
+        rc.offline_output_path = os.path.abspath(offline) if offline else ""
         rc.include_hud = bool(self.rec_hud.get())
         rc.include_debug = bool(self.rec_debug.get())
         rc.include_panels = bool(self.rec_panels.get())
@@ -1979,6 +2229,24 @@ class ControlGUI:
         rc.show_frame_index = bool(self.rec_frameidx.get())
         rc.scale_percent = int(self.rec_scale_var.get())
         rc.include_labels = bool(self.rec_labels.get())
+
+        adm = self.cfg.adm
+        adm.adm_enable = bool(self.adm_enable.get())
+        adm.adm_fairness_cooldown_periods = int(self.adm_cooldown.get())
+        adm.adm_target_dos_A_days = float(self.adm_dos_A.get())
+        adm.adm_target_dos_B_days = float(self.adm_dos_B.get())
+        adm.adm_enable_emergency_A_preempt = bool(self.adm_emerg.get())
+        adm.adm_seed = int(self.adm_seed.get())
+
+        gp = self.cfg.gameplay
+        gp.gp_realism_enable = bool(self.gp_realism_enable.get())
+        gp.gp_legtime_distance_model = bool(self.gp_legtime_distance_model.get())
+        gp.gp_legtime_radius_min = float(self.gp_radius_min.get())
+        gp.gp_legtime_radius_max = float(self.gp_radius_max.get())
+        gp.gp_legtime_spread_seed = int(self.gp_spread_seed.get())
+        gp.gp_fleetopt_enable = bool(self.gp_fleetopt_enable.get())
+        for k, var in self.gp_weight_vars.items():
+            gp.gp_fleetopt_weights[k] = float(var.get())
 
         return True
 
@@ -1997,15 +2265,15 @@ class ControlGUI:
             msg.append("imageio/imageio-ffmpeg missing — MP4 assembly disabled")
             m = self.record_format_menu["menu"]
             try:
-                m.entryconfig("MP4", state="disabled")
+                m.entryconfig("mp4", state="disabled")
             except Exception:
                 pass
-            if self.record_format.get() == "MP4":
-                self.record_format.set("PNG frames")
+            if self.record_format.get() == "mp4":
+                self.record_format.set("png")
         else:
             m = self.record_format_menu["menu"]
             try:
-                m.entryconfig("MP4", state="normal")
+                m.entryconfig("mp4", state="normal")
             except Exception:
                 pass
         self.dep_msg.configure(text=("; ".join(msg) if msg else "All dependencies available."),
@@ -2022,14 +2290,18 @@ class ControlGUI:
         if not _HAS_PYGAME:
             messagebox.showerror("Missing Dependency", "pygame is required to run the simulation.")
             return
-        if self.cfg.recording.record_live:
-            d = self.cfg.recording.live_out_dir
+        if self.cfg.recording.record_live_enabled:
+            d = self.cfg.recording.record_live_folder
             if not d or not os.path.isdir(d):
                 messagebox.showerror("Output Folder Required", "Select a valid folder for live recordings before starting.")
                 return
         save_config(self.cfg)
         self.root.destroy()
         exit_code, live_out = run_sim(self.cfg)
+        if live_out:
+            tmp = tk.Tk(); tmp.withdraw()
+            messagebox.showinfo("Recording saved", f"Recording written to {live_out}")
+            tmp.destroy()
         if exit_code == "GUI":
             main()
 
@@ -2042,9 +2314,9 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
             cfg.theme.ac_colors = AIRFRAME_COLORSETS[cfg.theme.ac_colorset]
         cfg.periods = 2
         cfg.recording.frames_per_period = 1
-        cfg.recording.record_format = "PNG frames"
+        cfg.recording.record_live_format = "png"
         slug = name.replace(" ", "_")
-        cfg.recording.offline_out_file = os.path.join(out_dir, f"{slug}.png")
+        cfg.recording.offline_output_path = os.path.join(out_dir, f"{slug}.png")
         render_offline(cfg)
 
         def hex2rgb(h):
