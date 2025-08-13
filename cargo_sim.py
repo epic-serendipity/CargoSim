@@ -677,7 +677,7 @@ class LogisticsSim:
         if not is_ops_capable(_row_to_spoke(self.stock[s])):
             return False
         self.stock[s][2] = max(0.0, self.stock[s][2] - amount)
-        self.stock[s][3] = max(0, self.stock[s][3] - amount)
+        self.stock[s][3] = max(0.0, self.stock[s][3] - amount)
         assert self.stock[s][2] >= -1e-9 and self.stock[s][3] >= -1e-9, "C/D negative after op"
         self.ops_by_spoke[s] += 1
         return True
@@ -933,7 +933,7 @@ class LogisticsSim:
         return actions_this_period
 
     def ops_count(self) -> int:
-        return sum(self.op)
+        return sum(1 for row in self.stock if is_ops_capable(_row_to_spoke(row)))
 
     def check_invariants(self, pre_stock, ops_before):
         violations: List[str] = []
@@ -1076,7 +1076,7 @@ class Renderer:
         self.fullscreen = sim.cfg.launch_fullscreen and not force_windowed
         pygame.display.set_caption("CargoSim — Hub–Spoke Logistics")
         if self.fullscreen:
-            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
             self.width, self.height = self.screen.get_size()
         else:
             self.width, self.height = 1200, 850
@@ -1137,7 +1137,9 @@ class Renderer:
         key = (text, id(font), color)
         surf = self.text_cache.get(key)
         if surf is None:
-            surf = font.render(text, True, color).convert_alpha()
+            base = font.render(text, True, color)
+            disp = pygame.display.get_surface()
+            surf = base.convert_alpha() if disp is not None else base
             self.text_cache[key] = surf
         return surf
 
@@ -1158,12 +1160,13 @@ class Renderer:
     def _toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
         if self.fullscreen:
-            self.screen = pygame.display.set_mode((0,0), pygame.FULLSCREEN)
+            self.screen = pygame.display.set_mode((0,0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
             self.width, self.height = self.screen.get_size()
         else:
             self.screen = pygame.display.set_mode((1200, 850), self.flags)
             self.width, self.height = 1200, 850
         self.sim.cfg.launch_fullscreen = self.fullscreen
+        save_config(self.sim.cfg)
         self._compute_layout()
 
     def draw_spokes(self):
@@ -1620,18 +1623,21 @@ def render_offline(cfg: SimConfig):
 
     # headless surface rendering
     os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-    import pygame as pg
-    pg.init()
+    pygame.init()
     w, h = 1200, 850
-    screen = pg.Surface((w,h))
 
     # Build sim and a faux renderer that draws onto our surface without display
     class Headless(Renderer):
         def __init__(self, sim):
-            # do not call display.set_mode (bypass parent __init__)
+            os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+            if not pygame.display.get_init():
+                pygame.display.init()
+            pygame.display.set_mode((1, 1), flags=pygame.HIDDEN)
+
+            # do not call parent __init__ (no visible window)
             self.sim = sim
             self.width, self.height = w, h
-            self.screen = screen
+            self.screen = pygame.Surface((self.width, self.height), flags=pygame.SRCALPHA)
             self.clock = None
 
             # ensure attributes used by _compute_layout / draw paths exist
@@ -1651,7 +1657,7 @@ def render_offline(cfg: SimConfig):
             self.period_seconds = float(self.sim.cfg.period_seconds)
             self.debug_overlay = False
             self.paused = False
-            self.recorder = Recorder(live=False, out_dir="", fps=0, fmt="PNG frames")
+            self.recorder = Recorder(RecordingConfig(), 0)
             self._last_heading_by_ac = {}
 
         def run(self): pass  # not used
@@ -1676,23 +1682,23 @@ def render_offline(cfg: SimConfig):
         actions = sim.actions_log[-1] if sim.actions_log else []
         for f in range(frames_per_period):
             alpha = (f + 1) / frames_per_period
-            screen.fill(rnd.bg)
+            rnd.screen.fill(rnd.bg)
             rnd.draw_spokes()
             rnd.draw_bars()
             rnd.draw_hud()
             rnd.draw_aircraft(actions, alpha)
             if write_mp4:
-                arr = pg.surfarray.array3d(screen).swapaxes(0,1)
+                arr = pygame.surfarray.array3d(rnd.screen).swapaxes(0,1)
                 writer.append_data(arr)  # type: ignore
             else:
                 frame_file = os.path.join(out_dir, f"frame_{frame_idx:06d}.png")
-                pg.image.save(screen, frame_file)
+                pygame.image.save(rnd.screen, frame_file)
             frame_idx += 1
         sim.step_period()
 
     if write_mp4:
         writer.close()
-    pg.quit()
+    pygame.quit()
     return rc.offline_output_path if write_mp4 else out_dir
 
 # ------------------------- Tkinter Control GUI -------------------------
