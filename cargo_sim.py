@@ -1340,7 +1340,6 @@ class Renderer(VizState):
         if not _HAS_PYGAME:
             raise RuntimeError("pygame is required to run the simulator.")
         pygame.init()
-        pygame.font.init()
         self.flags = pygame.RESIZABLE
         self.fullscreen = sim.cfg.launch_fullscreen and not force_windowed
         pygame.display.set_caption("CargoSim — Hub–Spoke Logistics")
@@ -1349,7 +1348,6 @@ class Renderer(VizState):
         else:
             self.screen = pygame.display.set_mode((1200, 850), self.flags)
         self.surface = self.screen
-        self.width, self.height = self.surface.get_size()
         self.clock = pygame.time.Clock()
         self.sim = sim
 
@@ -1364,9 +1362,8 @@ class Renderer(VizState):
         self.right_panel_mode = getattr(self.sim.cfg, "right_panel_view", "ops_total_sparkline")
 
         self._apply_theme()
-        self._compute_layout(self.width, self.height)
-        self._build_fonts()
-        self._compose_static()
+        w, h = pygame.display.get_surface().get_size()
+        self._init_gfx_pipeline(w, h)
 
         self.cursor_col = hex2rgb(CURSOR_COLORS.get(self.sim.cfg.cursor_color, CURSOR_COLORS["Cobalt"]))
 
@@ -1393,7 +1390,9 @@ class Renderer(VizState):
         self.exit_code = None  # "GUI" to return to control panel
         self.menu_open = False
 
-    def _apply_theme(self):
+    def _apply_theme(self, theme_name: Optional[str] = None):
+        if theme_name:
+            apply_theme_preset(self.sim.cfg.theme, theme_name)
         t = self.sim.cfg.theme
         bg = hex2rgb(t.game_bg)
         text = hex2rgb(t.game_fg)
@@ -1419,19 +1418,29 @@ class Renderer(VizState):
         self.ac_colors = {k: hex2rgb(v) for k, v in t.ac_colors.items()}
         self.bar_cols = [self.tt.bar_A, self.tt.bar_B, self.tt.bar_C, self.tt.bar_D]
         self.overlay_backdrop_rgba = (*self.tt.bg, 160)
-        if hasattr(self, "font_big"):
-            self._compose_static()
-            self._hud_cache = {}
+        self._hud_cache = {}
 
     def _text(self, text: str, font, color: Tuple[int, int, int]):
+        if font is None:
+            raise RuntimeError("Fonts not built yet; call _build_fonts before rendering text.")
         surf = font.render(text, True, color)
-        if pygame.display.get_surface():
+        disp = pygame.display.get_surface()
+        if disp is not None:
             try:
                 return surf.convert_alpha()
             except pygame.error:
-                pass
+                return surf
         return surf
-    def _compute_layout(self, width: int, height: int):
+
+    def _build_fonts(self, h: int):
+        big = clamp(int(h * 0.028), 16, 36)
+        small = clamp(int(h * 0.018), 12, 20)
+        pygame.font.init()
+        self.font_big = pygame.font.SysFont(None, big)
+        self.font_small = pygame.font.SysFont(None, small)
+
+    def _init_gfx_pipeline(self, width: int, height: int) -> None:
+        assert getattr(self, "tt", None) is not None, "_apply_theme must run before init pipeline."
         self.layout = compute_layout(width, height)
         self.width, self.height = width, height
         self.cx = self.layout.map.centerx
@@ -1448,15 +1457,9 @@ class Renderer(VizState):
         for r in (self.layout.left, self.layout.right, self.layout.map):
             if r.width <= 0 or r.height <= 0:
                 raise ValueError("layout rectangle collapsed")
-
-    def _build_fonts(self):
-        h = self.layout.h
-        big = clamp(int(h * 0.028), 16, 36)
-        small = clamp(int(h * 0.018), 12, 20)
-        self.font_big = pygame.font.SysFont(None, big)
-        self.font_small = pygame.font.SysFont(None, small)
-        self.bigfont = self.font_big
-        self.font = self.font_small
+        self._build_fonts(self.layout.h)
+        self._compose_static()
+        self._hud_cache = {}
 
     def _compose_static(self):
         assert hasattr(self, "font_big")
@@ -1472,6 +1475,10 @@ class Renderer(VizState):
         pygame.font.init()
         pygame.display.set_mode((1, 1), flags=pygame.HIDDEN)
 
+    def change_theme(self, theme_name: str) -> None:
+        self._apply_theme(theme_name)
+        self._init_gfx_pipeline(self.layout.w, self.layout.h)
+
     def _toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
         if self.fullscreen:
@@ -1480,18 +1487,14 @@ class Renderer(VizState):
             self.screen = pygame.display.set_mode((1200, 850), self.flags)
         self.surface = self.screen
         w, h = self.surface.get_size()
-        self.width, self.height = w, h
         if self.fullscreen:
             self.sim.cfg.recording.last_fullscreen_size = (w, h)
         self.sim.cfg.launch_fullscreen = self.fullscreen
         save_config(self.sim.cfg)
         try:
-            self._compute_layout(w, h)
+            self._init_gfx_pipeline(w, h)
         except ValueError:
-            self._compute_layout(1920, 1080)
-        self._build_fonts()
-        self._compose_static()
-        self._hud_cache = {}
+            self._init_gfx_pipeline(1920, 1080)
 
     def draw_spokes(self):
         pygame.draw.circle(self.surface, self.tt.hub, (self.cx, self.cy), 10)
@@ -1727,7 +1730,7 @@ class Renderer(VizState):
         max_ops = self.sim.M
         label_txt = ellipsize(f"Operational: {ops}", self.font_small, left_inner.width)
         label = self._text(label_txt, self.font_small, self.tt.text)
-        self.surface.blit(label, (left_inner.left, left_inner.top))
+        self.surface.blit(label, left_inner.topleft)
 
         bar_h = int(left_inner.height * 0.25)
         bar_x = left_inner.left
@@ -1771,14 +1774,15 @@ class Renderer(VizState):
         panel_w = right_inner.width
         if mode == "ops_total_number":
             total = self.sim.ops_total_history[-1] if self.sim.ops_total_history else 0
-            title_txt = ellipsize("Total Ops", self.font_small, panel_w)
-            title = self._text(title_txt, self.font_small, self.tt.text)
-            self.surface.blit(title, (rx + (panel_w - title.get_width()) // 2, base_y))
+            label_txt = ellipsize(f"Total Ops: {total}", self.font_small, panel_w)
+            label = self._text(label_txt, self.font_small, self.tt.text)
+            self.surface.blit(label, (rx + (panel_w - label.get_width()) // 2, base_y))
+            num_y = base_y + label.get_height() + int(pad * 0.5)
             num = self.font_big.render(str(total), True, self.tt.text)
-            self.surface.blit(num, (rx + (panel_w - num.get_width()) // 2, base_y + 40))
+            self.surface.blit(num, (rx + (panel_w - num.get_width()) // 2, num_y))
         elif mode == "ops_total_sparkline":
             hist = self.sim.ops_total_history
-            lbl_txt = ellipsize("Total Ops", self.font_small, panel_w)
+            lbl_txt = ellipsize(f"Total Ops: {hist[-1] if hist else 0}", self.font_small, panel_w)
             lbl = self._text(lbl_txt, self.font_small, self.tt.text)
             self.surface.blit(lbl, (rx + (panel_w - lbl.get_width()) // 2, base_y))
             rect = pygame.Rect(rx, base_y + lbl.get_height() + int(pad * 0.5), panel_w, 120)
@@ -1796,9 +1800,6 @@ class Renderer(VizState):
                     y = rect.bottom - (val / max_val) * rect.height
                     pts.append((x, y))
                 pygame.draw.lines(self.surface, self.tt.text, False, pts, 2)
-            val_txt = ellipsize(f"Total Ops: {hist[-1] if hist else 0}", self.font_small, panel_w)
-            v_surf = self._text(val_txt, self.font_small, self.tt.text)
-            self.surface.blit(v_surf, (rx, rect.bottom - v_surf.get_height() - int(pad * 0.3)))
         else:
             ops_counts = self.sim.ops_by_spoke
             max_ops_spoke = max(1, max(ops_counts) if ops_counts else 1)
@@ -1891,17 +1892,13 @@ class Renderer(VizState):
                     if event.type == pygame.VIDEORESIZE:
                         pygame.display.set_mode((event.w, event.h), self.flags)
                     w, h = pygame.display.get_surface().get_size()
-                    self.width, self.height = w, h
                     if self.fullscreen:
                         self.sim.cfg.recording.last_fullscreen_size = (w, h)
                     try:
-                        self._compute_layout(w, h)
+                        self._init_gfx_pipeline(w, h)
                     except ValueError:
                         w, h = pygame.display.get_surface().get_size()
-                        self._compute_layout(w, h)
-                    self._build_fonts()
-                    self._compose_static()
-                    self._hud_cache = {}
+                        self._init_gfx_pipeline(w, h)
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self.paused = True
@@ -2021,28 +2018,23 @@ def render_offline(cfg: SimConfig):
     class Headless(Renderer):
         def __init__(self, sim, width, height):
             self.sim = sim
-            self.width, self.height = width, height
-            self._init_display_headless_safe()
-            self.surface = pygame.Surface((width, height), flags=pygame.SRCALPHA)
-            self.screen = self.surface
-            self.clock = None
-
             self.fullscreen = False
             self.flags = 0
-
             self._hud_cache = {}
             self.show_debug = bool(getattr(self.sim.cfg, "debug_enabled", False))
             self.show_safe_area = False
             self.include_side_panels = True
             self.right_panel_mode = getattr(self.sim.cfg, "right_panel_view", "ops_total_sparkline")
 
+            self._init_display_headless_safe()
             self._apply_theme()
             try:
-                self._compute_layout(width, height)
+                self._init_gfx_pipeline(width, height)
             except ValueError:
-                self._compute_layout(1920, 1080)
-            self._build_fonts()
-            self._compose_static()
+                self._init_gfx_pipeline(1920, 1080)
+            self.surface = pygame.Surface((width, height), flags=pygame.SRCALPHA)
+            self.screen = self.surface
+            self.clock = None
 
             self.cursor_col = hex2rgb(CURSOR_COLORS.get(self.sim.cfg.cursor_color, CURSOR_COLORS["Cobalt"]))
 
