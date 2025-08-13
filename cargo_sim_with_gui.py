@@ -36,7 +36,7 @@ except Exception:
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_config.json")
 DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_debug.log")
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 
 # ------------------------- Defaults & Model Parameters -------------------------
 
@@ -54,7 +54,7 @@ VIS_CAPS_DFLT = (6, 2, 4, 4)  # used for relative bar heights
 
 # ------------------------- Theme Presets & Color Maps -------------------------
 
-CURRENT_THEME_VERSION = 1
+CURRENT_THEME_VERSION = 2
 
 def _hex(h):  # helper to clamp/normalize hex
     h = h.strip().lstrip("#")
@@ -62,7 +62,7 @@ def _hex(h):  # helper to clamp/normalize hex
         h = "".join([c*2 for c in h])
     return "#" + h.lower()
 
-def hex_to_rgb(h: str):
+def hex2rgb(h: str):
     h = h.strip().lstrip("#")
     if len(h) == 3:
         h = "".join([c*2 for c in h])
@@ -72,63 +72,6 @@ def blend(a, b, t: float):
     return tuple(int(a[i]*(1-t) + b[i]*t) for i in range(3))
 
 THEME_PRESETS = {
-    # name: dict fields for ThemeConfig
-    "Classic Light": {
-        "menu_theme": "light",
-        "game_bg": _hex("f7f7fa"),
-        "game_fg": _hex("0f172a"),
-        "game_muted": _hex("64748b"),
-        "hub_color": _hex("e5e7eb"),
-        "good_spoke": _hex("16a34a"),
-        "bad_spoke": _hex("dc2626"),
-        "bar_A": _hex("2563eb"),
-        "bar_B": _hex("f59e0b"),
-        "bar_C": _hex("10b981"),
-        "bar_D": _hex("ef4444"),
-        "default_airframe_colorset": "Neutral Grays",
-    },
-    "Classic Dark": {
-        "menu_theme": "dark",
-        "game_bg": _hex("0f172a"),
-        "game_fg": _hex("e5e7eb"),
-        "game_muted": _hex("9ca3af"),
-        "hub_color": _hex("1f2937"),
-        "good_spoke": _hex("22c55e"),
-        "bad_spoke": _hex("ef4444"),
-        "bar_A": _hex("60a5fa"),
-        "bar_B": _hex("f59e0b"),
-        "bar_C": _hex("34d399"),
-        "bar_D": _hex("f87171"),
-        "default_airframe_colorset": "Neutral Grays",
-    },
-    "Cyber": {
-        "menu_theme": "dark",
-        "game_bg": _hex("000000"),
-        "game_fg": _hex("00ff41"),
-        "game_muted": _hex("00cc33"),
-        "hub_color": _hex("003311"),
-        "good_spoke": _hex("00ff41"),
-        "bad_spoke": _hex("00ff41"),
-        "bar_A": _hex("00ff41"),
-        "bar_B": _hex("00e63a"),
-        "bar_C": _hex("00cc33"),
-        "bar_D": _hex("009926"),
-        "default_airframe_colorset": "High Contrast",
-    },
-    "GitHub Light": {
-        "menu_theme": "light",
-        "game_bg": _hex("f6f8fa"),
-        "game_fg": _hex("24292f"),
-        "game_muted": _hex("57606a"),
-        "hub_color": _hex("d0d7de"),
-        "good_spoke": _hex("2da44e"),
-        "bad_spoke": _hex("cf222e"),
-        "bar_A": _hex("0969da"),
-        "bar_B": _hex("bf8700"),
-        "bar_C": _hex("1a7f37"),
-        "bar_D": _hex("cf222e"),
-        "default_airframe_colorset": "Blue / Orange",
-    },
     "GitHub Dark": {
         "menu_theme": "dark",
         "game_bg": _hex("0d1117"),
@@ -143,19 +86,19 @@ THEME_PRESETS = {
         "bar_D": _hex("f85149"),
         "default_airframe_colorset": "Blue / Orange",
     },
-    "Night Ops": {
-        "menu_theme": "dark",
-        "game_bg": _hex("0b0f14"),
-        "game_fg": _hex("d1d5db"),
-        "game_muted": _hex("9ca3af"),
-        "hub_color": _hex("111827"),
-        "good_spoke": _hex("22c55e"),
-        "bad_spoke": _hex("ef4444"),
-        "bar_A": _hex("60a5fa"),
-        "bar_B": _hex("fbbf24"),
-        "bar_C": _hex("22c55e"),
-        "bar_D": _hex("f87171"),
-        "default_airframe_colorset": "Camo (olive / tan)",
+    "Classic Light": {
+        "menu_theme": "light",
+        "game_bg": _hex("f7f7fa"),
+        "game_fg": _hex("0f172a"),
+        "game_muted": _hex("64748b"),
+        "hub_color": _hex("e5e7eb"),
+        "good_spoke": _hex("16a34a"),
+        "bad_spoke": _hex("dc2626"),
+        "bar_A": _hex("2563eb"),
+        "bar_B": _hex("f59e0b"),
+        "bar_C": _hex("10b981"),
+        "bar_D": _hex("ef4444"),
+        "default_airframe_colorset": "Neutral Grays",
     },
     "Solarized Light": {
         "menu_theme": "light",
@@ -171,48 +114,42 @@ THEME_PRESETS = {
         "bar_D": _hex("cb4b16"),
         "default_airframe_colorset": "Green / Yellow",
     },
-    "Solarized Dark": {
+    "Night Ops": {
         "menu_theme": "dark",
-        "game_bg": _hex("002b36"),
-        "game_fg": _hex("eee8d5"),
-        "game_muted": _hex("93a1a1"),
-        "hub_color": _hex("073642"),
-        "good_spoke": _hex("859900"),
-        "bad_spoke": _hex("dc322f"),
-        "bar_A": _hex("268bd2"),
-        "bar_B": _hex("b58900"),
-        "bar_C": _hex("2aa198"),
-        "bar_D": _hex("cb4b16"),
-        "default_airframe_colorset": "Green / Yellow",
+        "game_bg": _hex("0b0f14"),
+        "game_fg": _hex("d1d5db"),
+        "game_muted": _hex("9ca3af"),
+        "hub_color": _hex("111827"),
+        "good_spoke": _hex("22c55e"),
+        "bad_spoke": _hex("f87171"),
+        "bar_A": _hex("60a5fa"),
+        "bar_B": _hex("fbbf24"),
+        "bar_C": _hex("22c55e"),
+        "bar_D": _hex("f97316"),
+        "default_airframe_colorset": "Camo (olive / tan)",
     },
-    "Desert": {
-        "menu_theme": "light",
-        "game_bg": _hex("f3ead7"),
-        "game_fg": _hex("3f3a2e"),
-        "game_muted": _hex("7a6e5a"),
-        "hub_color": _hex("e5dcc9"),
-        "good_spoke": _hex("7cb342"),
-        "bad_spoke": _hex("bf360c"),
-        "bar_A": _hex("d4a373"),
-        "bar_B": _hex("b08968"),
-        "bar_C": _hex("a7c957"),
-        "bar_D": _hex("e76f51"),
-        "default_airframe_colorset": "Desert (sand / brown)",
+    "Cyber": {
+        "menu_theme": "dark",
+        "game_bg": _hex("000000"),
+        "game_fg": _hex("00ff41"),
+        "game_muted": _hex("00cc33"),
+        "hub_color": _hex("003311"),
+        "good_spoke": _hex("00ff41"),
+        "bad_spoke": _hex("00ff41"),
+        "bar_A": _hex("00ff41"),
+        "bar_B": _hex("00e63a"),
+        "bar_C": _hex("00cc33"),
+        "bar_D": _hex("009926"),
+        "default_airframe_colorset": "High Contrast",
     },
-    "Ocean": {
-        "menu_theme": "light",
-        "game_bg": _hex("e6f1f8"),
-        "game_fg": _hex("0a2540"),
-        "game_muted": _hex("55738a"),
-        "hub_color": _hex("c7d9e8"),
-        "good_spoke": _hex("2ea44f"),
-        "bad_spoke": _hex("d73a49"),
-        "bar_A": _hex("1e88e5"),
-        "bar_B": _hex("00acc1"),
-        "bar_C": _hex("26a69a"),
-        "bar_D": _hex("ef5350"),
-        "default_airframe_colorset": "Navy (navy / gold)",
-    },
+}
+
+CURSOR_COLORS = {
+    "Cobalt": _hex("2556d9"),
+    "Signal Orange": _hex("f26b0f"),
+    "Cyber Lime": _hex("b7ff00"),
+    "Cerulean": _hex("0597d5"),
+    "Royal Magenta": _hex("b000b5"),
 }
 
 AIRFRAME_COLORSETS = {
@@ -229,7 +166,7 @@ AIRFRAME_COLORSETS = {
 }
 
 def apply_theme_preset(t: "ThemeConfig", name: str):
-    p = THEME_PRESETS.get(name, THEME_PRESETS["Classic Dark"])
+    p = THEME_PRESETS.get(name, THEME_PRESETS["Classic Light"])
     t.preset = name
     t.menu_theme = p["menu_theme"]
     t.game_bg = p["game_bg"]
@@ -252,20 +189,20 @@ def apply_theme_preset(t: "ThemeConfig", name: str):
 # ------------------------- Config -------------------------
 @dataclass
 class ThemeConfig:
-    preset: str = "Classic Dark"
-    menu_theme: str = "dark"     # applied to Tk controls
-    game_bg: str = "#121418"
-    game_fg: str = "#e0e0e0"
-    game_muted: str = "#8a8a8a"
-    hub_color: str = "#1e1e1e"
-    good_spoke: str = "#3ccc78"
-    bad_spoke: str = "#dc3c3c"
+    preset: str = "Classic Light"
+    menu_theme: str = "light"     # applied to Tk controls
+    game_bg: str = "#f7f7fa"
+    game_fg: str = "#0f172a"
+    game_muted: str = "#64748b"
+    hub_color: str = "#e5e7eb"
+    good_spoke: str = "#16a34a"
+    bad_spoke: str = "#dc2626"
     ac_colorset: Optional[str] = None
-    ac_colors: Dict[str, str] = field(default_factory=lambda: {"C-130": "#dcdcdc", "C-27": "#b5b5b5"})
-    bar_A: str = "#4682c8"
-    bar_B: str = "#eba23c"
-    bar_C: str = "#50b45a"
-    bar_D: str = "#d25050"
+    ac_colors: Dict[str, str] = field(default_factory=lambda: {"C-130": "#dcdcdc", "C-27": "#a6a6a6"})
+    bar_A: str = "#2563eb"
+    bar_B: str = "#f59e0b"
+    bar_C: str = "#10b981"
+    bar_D: str = "#ef4444"
     theme_version: int = 1
 
     def to_json(self) -> dict:
@@ -478,6 +415,7 @@ class SimConfig:
     orient_aircraft: bool = True
     show_dos_tooltips: bool = True
     hud_show_churn: bool = True
+    cursor_color: str = "Cobalt"
     theme: ThemeConfig = field(default_factory=ThemeConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
     adm: AdvancedDecisionConfig = field(default_factory=AdvancedDecisionConfig)
@@ -502,6 +440,7 @@ class SimConfig:
             "orient_aircraft": self.orient_aircraft,
             "show_dos_tooltips": self.show_dos_tooltips,
             "hud_show_churn": self.hud_show_churn,
+            "cursor_color": self.cursor_color,
             "theme": self.theme.to_json(),
             "recording": self.recording.to_json(),
             "adm": self.adm.to_json(),
@@ -534,6 +473,9 @@ class SimConfig:
         cfg.orient_aircraft = bool(d.get("orient_aircraft", cfg.orient_aircraft))
         cfg.show_dos_tooltips = bool(d.get("show_dos_tooltips", cfg.show_dos_tooltips))
         cfg.hud_show_churn = bool(d.get("hud_show_churn", cfg.hud_show_churn))
+        cfg.cursor_color = d.get("cursor_color", cfg.cursor_color)
+        if cfg.cursor_color not in CURSOR_COLORS:
+            cfg.cursor_color = "Cobalt"
         cfg.theme = ThemeConfig.from_json(d.get("theme", {}))
         cfg.recording = RecordingConfig.from_json(d.get("recording", {}))
         cfg.adm = AdvancedDecisionConfig.from_json(d.get("adm", {}))
@@ -549,13 +491,18 @@ def load_config() -> SimConfig:
             if cfg.config_version < CONFIG_VERSION:
                 cfg.config_version = CONFIG_VERSION
                 save_config(cfg)
-            if cfg.theme.theme_version < CURRENT_THEME_VERSION or cfg.theme.ac_colorset is None:
+            if cfg.theme.preset not in THEME_PRESETS:
+                apply_theme_preset(cfg.theme, "Classic Light")
+                save_config(cfg)
+            elif cfg.theme.theme_version < CURRENT_THEME_VERSION or cfg.theme.ac_colorset is None:
                 apply_theme_preset(cfg.theme, cfg.theme.preset)
             else:
-                # ensure ac_colors matches selected set if known
                 if cfg.theme.ac_colorset in AIRFRAME_COLORSETS:
                     cfg.theme.ac_colors = AIRFRAME_COLORSETS[cfg.theme.ac_colorset]
                 cfg.theme.theme_version = CURRENT_THEME_VERSION
+            if cfg.cursor_color not in CURSOR_COLORS:
+                cfg.cursor_color = "Cobalt"
+                save_config(cfg)
             return cfg
         except Exception:
             pass
@@ -577,6 +524,33 @@ def append_debug(lines: List[str]):
                 f.write(ln + "\n")
     except Exception:
         pass
+
+
+class _Tooltip:
+    def __init__(self, widget, text: str, theme: ThemeConfig):
+        self.widget = widget
+        self.text = text
+        self.theme = theme
+        self.tip: Optional[tk.Toplevel] = None
+        widget.bind("<Enter>", self.show)
+        widget.bind("<Leave>", self.hide)
+
+    def show(self, _=None):
+        if self.tip:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + 20
+        self.tip = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tk.Label(tw, text=self.text, background=self.theme.game_bg,
+                 foreground=self.theme.game_fg, relief="solid", borderwidth=1,
+                 padx=4, pady=2).pack()
+
+    def hide(self, _=None):
+        if self.tip:
+            self.tip.destroy()
+            self.tip = None
 
 # ------------------------- Dependency Manager -------------------------
 
@@ -922,6 +896,8 @@ class LogisticsSim:
         self.t += 1
         self.half = "AM" if self.t % 2 == 0 else "PM"
         self.ops_total_history.append(sum(self.ops_by_spoke))
+        if len(self.ops_total_history) > 2000:
+            self.ops_total_history = self.ops_total_history[-2000:]
 
         self.push_snapshot()
 
@@ -1062,24 +1038,13 @@ class Renderer:
 
         self._compute_layout()
 
-        # Theme colors
-        t = self.sim.cfg.theme
-        self.bg = hex_to_rgb(t.game_bg)
-        self.white = hex_to_rgb(t.game_fg)
-        self.grey = hex_to_rgb(t.game_muted)
-        self.hub_color = hex_to_rgb(t.hub_color)
-        self.good_spoke_col = hex_to_rgb(t.good_spoke)
-        self.bad_spoke_col = hex_to_rgb(t.bad_spoke)
-        self.ac_colors = {k: hex_to_rgb(v) for k,v in t.ac_colors.items()}
-        self.bar_cols = [hex_to_rgb(t.bar_A), hex_to_rgb(t.bar_B), hex_to_rgb(t.bar_C), hex_to_rgb(t.bar_D)]
-
-        self.panel_bg = blend(self.bg, self.hub_color, 0.3)
-        self.panel_btn = blend(self.bg, self.hub_color, 0.5)
-        self.panel_btn_fg = self.white
-        self.overlay_backdrop_rgba = (*self.bg, 160)
-
         self.font = pygame.font.SysFont("consolas", 18)
         self.bigfont = pygame.font.SysFont("consolas", 22, bold=True)
+
+        self.text_cache: Dict[Tuple[str,int,Tuple[int,int,int]], "pygame.Surface"] = {}
+        self._hud_cache: Dict[str, Tuple[str, "pygame.Surface"]] = {}
+
+        self._apply_theme()
 
         self.period_seconds = float(self.sim.cfg.period_seconds)
         self.paused = False
@@ -1099,17 +1064,48 @@ class Renderer:
         self._pm_rects = {}
         self._last_heading_by_ac: Dict[str, float] = {}
 
+        self.cursor_col = hex2rgb(CURSOR_COLORS.get(self.sim.cfg.cursor_color, CURSOR_COLORS["Cobalt"]))
+
+    def _apply_theme(self):
+        t = self.sim.cfg.theme
+        self.bg = hex2rgb(t.game_bg)
+        self.white = hex2rgb(t.game_fg)
+        self.grey = hex2rgb(t.game_muted)
+        self.hub_color = hex2rgb(t.hub_color)
+        self.good_spoke_col = hex2rgb(t.good_spoke)
+        self.bad_spoke_col = hex2rgb(t.bad_spoke)
+        self.ac_colors = {k: hex2rgb(v) for k, v in t.ac_colors.items()}
+        self.bar_cols = [hex2rgb(t.bar_A), hex2rgb(t.bar_B), hex2rgb(t.bar_C), hex2rgb(t.bar_D)]
+        self.panel_bg = blend(self.bg, self.hub_color, 0.3)
+        self.panel_btn = blend(self.bg, self.hub_color, 0.5)
+        self.panel_btn_fg = self.white
+        self.overlay_backdrop_rgba = (*self.bg, 160)
+        # rebuild static text using new colors
+        self.hub_text = self._text("HUB", self.bigfont, self.white)
+        self.spoke_text = [self._text(f"S{i+1}", self.font, self.white) for i in range(M)]
+        self.bar_letter_surfs = [self._text(ch, self.font, self.grey) for ch in ["A","B","C","D"]]
+
+    def _text(self, text: str, font, color: Tuple[int,int,int]):
+        key = (text, id(font), color)
+        surf = self.text_cache.get(key)
+        if surf is None:
+            surf = font.render(text, True, color).convert_alpha()
+            self.text_cache[key] = surf
+        return surf
+
     def _compute_layout(self):
         self.cx = self.width // 2
         self.cy = self.height // 2
         side_pad = 180 if self.fullscreen else 40
         self.radius = int(min(self.cx - side_pad, self.cy - 120))
         self.spoke_pos = []
+        self.bar_bases = []
         for idx in range(M):
             theta = 2*math.pi*idx / M
             x = self.cx + (self.radius - 20) * math.cos(theta)
             y = self.cy + (self.radius - 20) * math.sin(theta)
             self.spoke_pos.append((x, y))
+            self.bar_bases.append((int(x) + 14, int(y) + 16))
 
     def _toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
@@ -1123,17 +1119,19 @@ class Renderer:
 
     def draw_spokes(self):
         pygame.draw.circle(self.screen, self.hub_color, (self.cx, self.cy), 10)
-        hub_text = self.bigfont.render("HUB", True, self.white)
-        self.screen.blit(hub_text, (self.cx - hub_text.get_width()//2, self.cy - 30))
+        self.screen.blit(self.hub_text, (self.cx - self.hub_text.get_width()//2, self.cy - 30))
 
         is_cyber = (self.sim.cfg.theme.preset == "Cyber")
+        mx, my = pygame.mouse.get_pos()
         for i, (x, y) in enumerate(self.spoke_pos):
             has_A = self.sim.stock[i][0] > 0
             has_B = self.sim.stock[i][1] > 0
+            if (mx - x)**2 + (my - y)**2 < 18**2:
+                pygame.draw.circle(self.screen, self.cursor_col, (int(x), int(y)), 12, 2)
             if is_cyber and not (has_A and has_B):
                 t = time.time()
                 pulse = (math.sin(t * math.tau * 1.8) + 1) / 2
-                dark = hex_to_rgb("#004d19")
+                dark = hex2rgb("#004d19")
                 color = blend(dark, self.good_spoke_col, pulse)
                 pygame.draw.circle(self.screen, color, (int(x), int(y)), 9)
                 r = 14
@@ -1149,32 +1147,47 @@ class Renderer:
                 color = self.good_spoke_col if (has_A and has_B) else self.bad_spoke_col
                 pygame.draw.circle(self.screen, color, (int(x), int(y)), 9)
                 lbl_col = self.white
-            label = self.font.render(f"S{i+1}", True, lbl_col)
+            if lbl_col == self.white:
+                label = self.spoke_text[i]
+            else:
+                label = self._text(f"S{i+1}", self.font, lbl_col)
             self.screen.blit(label, (int(x) - label.get_width()//2, int(y) - 26))
 
     def draw_bars(self):
         bar_w = 8
         gap = 4
-        labels = ["A","B","C","D"]
-        for i, (x, y) in enumerate(self.spoke_pos):
-            base_x = int(x) + 14
-            base_y = int(y) + 16
+        for i, (base_x, base_y) in enumerate(self.bar_bases):
             for k in range(4):
                 denom = VIS_CAPS_DFLT[k] if VIS_CAPS_DFLT[k] else 1
                 ratio = self.sim.stock[i][k] / denom
                 h = int(28 * min(2.0, ratio))
                 rect = pygame.Rect(base_x + k*(bar_w+gap), base_y - h, bar_w, h)
                 pygame.draw.rect(self.screen, self.bar_cols[k], rect)
-                t = self.font.render(labels[k], True, self.grey)
+                t = self.bar_letter_surfs[k]
                 self.screen.blit(t, (rect.x + rect.w//2 - t.get_width()//2, rect.y + h + 2))
 
     def draw_hud(self):
         title = f"{self.sim.cfg.fleet_label} | Period {self.sim.t}/{self.sim.cfg.periods} ({self.sim.half}, Day {self.sim.t//2}) | Ops: {self.sim.ops_count()}"
-        t = self.bigfont.render(title, True, self.white)
-        self.screen.blit(t, (20, 16))
+        surf = self._hud_cache.get("title")
+        if not surf or surf[0] != title:
+            surf = (title, self._text(title, self.bigfont, self.white))
+            self._hud_cache["title"] = surf
+        self.screen.blit(surf[1], (20, 16))
 
-        help1 = self.font.render("SPACE pause | ←/→ step | +/− speed | D debug | F11 fullscreen | M minimize | G menu | R reset | ESC", True, self.grey)
-        self.screen.blit(help1, (20, self.height - 30))
+        help1 = self._hud_cache.get("help")
+        if not help1:
+            text = "SPACE pause | ←/→ step | +/− speed | D debug | F11 fullscreen | M minimize | G menu | R reset | ESC"
+            help1 = (text, self._text(text, self.font, self.grey))
+            self._hud_cache["help"] = help1
+        self.screen.blit(help1[1], (20, self.height - 30))
+
+        if self.recorder.frames_dropped > 0:
+            msg = f"Dropped frames: {self.recorder.frames_dropped}"
+            drop = self._hud_cache.get("drop")
+            if not drop or drop[0] != msg:
+                drop = (msg, self._text(msg, self.font, self.bad_spoke_col))
+                self._hud_cache["drop"] = drop
+            self.screen.blit(drop[1], (20, 40))
 
     def draw_aircraft(self, actions_this_period: List[Tuple[str,str]], alpha: float):
         moves_by_ac: Dict[str, List[Tuple[str,str]]] = {}
@@ -1335,20 +1348,20 @@ class Renderer:
             hist = self.sim.ops_total_history
             rect = pygame.Rect(rx + pad, base_y, panel_w - 2*pad, 120)
             pygame.draw.rect(self.screen, self.panel_bg, rect, border_radius=6)
-            N = min(rect.width, len(hist))
+            N = min(120, len(hist))
             if N >= 2:
                 tail = hist[-N:]
                 max_val = max(tail)
                 if max_val <= 0:
                     max_val = 1
-                step = rect.width / (N-1)
+                step = rect.width / max(1, N-1)
                 pts = []
                 for i, val in enumerate(tail):
                     x = rect.left + i*step
                     y = rect.bottom - (val/max_val)*rect.height
                     pts.append((x, y))
                 pygame.draw.lines(self.screen, self.white, False, pts, 2)
-            lbl = self.font.render(f"Total Ops: {hist[-1] if hist else 0}", True, self.white)
+            lbl = self._text(f"Total Ops: {hist[-1] if hist else 0}", self.font, self.white)
             self.screen.blit(lbl, (rect.x, rect.y - 24))
         else:
             ops_counts = self.sim.ops_by_spoke
@@ -1567,30 +1580,17 @@ def render_offline(cfg: SimConfig):
 
             self._compute_layout()
 
-            # theme
-            t = self.sim.cfg.theme
-            self.bg = hex_to_rgb(t.game_bg)
-            self.white = hex_to_rgb(t.game_fg)
-            self.grey = hex_to_rgb(t.game_muted)
-            self.hub_color = hex_to_rgb(t.hub_color)
-            self.good_spoke_col = hex_to_rgb(t.good_spoke)
-            self.bad_spoke_col = hex_to_rgb(t.bad_spoke)
-            self.ac_colors = {k: hex_to_rgb(v) for k,v in t.ac_colors.items()}
-            self.bar_cols = [hex_to_rgb(t.bar_A), hex_to_rgb(t.bar_B), hex_to_rgb(t.bar_C), hex_to_rgb(t.bar_D)]
-
             pygame.font.init()
             self.font = pygame.font.SysFont("consolas", 18)
             self.bigfont = pygame.font.SysFont("consolas", 22, bold=True)
+            self.text_cache = {}
+            self._hud_cache = {}
+            self._apply_theme()
+            self.cursor_col = hex2rgb(CURSOR_COLORS.get(self.sim.cfg.cursor_color, CURSOR_COLORS["Cobalt"]))
 
             self.period_seconds = float(self.sim.cfg.period_seconds)
             self.debug_overlay = False
             self.paused = False
-
-            # derive panel colors from theme so pause/menu visuals stay on-brand
-            self.panel_bg = blend(self.bg, self.hub_color, 0.3)
-            self.panel_btn = blend(self.bg, self.hub_color, 0.5)
-            self.panel_btn_fg = self.white
-            self.overlay_backdrop_rgba = (*self.bg, 160)
             self.recorder = Recorder(live=False, out_dir="", fps=0, fmt="PNG frames")
             self._last_heading_by_ac = {}
 
@@ -1697,7 +1697,7 @@ class ControlGUI:
         def rgb2hex(rgb):
             return "#%02x%02x%02x" % rgb
         def blend_hex(h1, h2, tt):
-            a = hex_to_rgb(h1); b = hex_to_rgb(h2)
+            a = hex2rgb(h1); b = hex2rgb(h2)
             c = blend(a, b, tt)
             return rgb2hex(c)
         bg = t.game_bg
@@ -1713,6 +1713,9 @@ class ControlGUI:
         self.root.configure(bg=bg)
         style.configure(".", background=bg, foreground=fg, fieldbackground=field_bg)
         style.configure("Card.TFrame", background=card_bg, relief="flat")
+        style.map("TButton", foreground=[("disabled", disabled_fg)], background=[("disabled", disabled_bg)])
+        style.map("TCheckbutton", foreground=[("disabled", disabled_fg)], background=[("disabled", disabled_bg)])
+        style.map("TMenubutton", foreground=[("disabled", disabled_fg)], background=[("disabled", disabled_bg)])
         style.configure("TLabel", background=card_bg, foreground=fg, padding=2)
         style.configure("TCheckbutton", background=card_bg, foreground=fg)
         style.configure("TEntry", fieldbackground=field_bg, foreground=fg, insertcolor=fg, padding=4, relief="flat")
@@ -1750,6 +1753,9 @@ class ControlGUI:
         def show():
             messagebox.showinfo("Page Notes", detail)
         ttk.Button(bar, text="Learn more …", command=show).pack(side="right")
+
+    def _add_tip(self, widget, text):
+        _Tooltip(widget, text, self.cfg.theme)
 
     # ---- Helpers for "Scale + Entry" controls ----
     def _scale_with_entry(self, parent, label_text, from_, to_, var_type="int", init=0):
@@ -1961,8 +1967,9 @@ class ControlGUI:
 
         ttk.Label(frm, text="Seconds per Period").grid(row=1, column=0, sticky="w")
         self.per_sec_var = tk.DoubleVar(value=self.cfg.period_seconds)
-        per_scale = ttk.Scale(frm, from_=0.05, to=2.0, orient="horizontal", variable=self.per_sec_var)
+        per_scale = ttk.Scale(frm, from_=2.0, to=0.05, orient="horizontal", variable=self.per_sec_var)
         per_scale.grid(row=1, column=1, sticky="we")
+        self._add_tip(per_scale, "Time each period takes")
         self.per_sec_lbl = ttk.Label(frm, text=f"sec/period: {self.cfg.period_seconds:.2f}")
         self.per_sec_lbl.grid(row=1, column=2, sticky="w")
         self.per_sec_warn = ttk.Label(frm, text="", foreground="red")
@@ -1973,8 +1980,7 @@ class ControlGUI:
             val = round(val / 0.05) * 0.05
             self.per_sec_var.set(val)
             self.per_sec_lbl.config(text=f"sec/period: {val:.2f}")
-            warn = (val <= 0.10 and self.cfg.recording.record_live_enabled and
-                    self.cfg.recording.record_live_format == "mp4" and not self.cfg.recording.record_async_writer)
+            warn = (val <= 0.10 and not self.cfg.recording.record_async_writer)
             self.per_sec_warn.config(text="Performance warning" if warn else "")
         per_scale.bind("<B1-Motion>", _upd_sec)
         per_scale.bind("<ButtonRelease-1>", _upd_sec)
@@ -2000,10 +2006,19 @@ class ControlGUI:
         self.orient_ac = tk.BooleanVar(value=self.cfg.orient_aircraft)
         ttk.Checkbutton(frm, variable=self.orient_ac).grid(row=7, column=1, sticky="w")
 
-        ttk.Separator(frm).grid(row=8, column=0, columnspan=3, sticky="we", pady=8)
+        ttk.Label(frm, text="Cursor Color").grid(row=8, column=0, sticky="w", pady=(6,0))
+        self.cursor_color = tk.StringVar(value=self.cfg.cursor_color)
+        def on_cursor_change(*_):
+            self.cfg.cursor_color = self.cursor_color.get()
+            save_config(self.cfg)
+        cursor_menu = ttk.OptionMenu(frm, self.cursor_color, self.cursor_color.get(), *CURSOR_COLORS.keys(), command=lambda _: on_cursor_change())
+        cursor_menu.grid(row=8, column=1, sticky="w")
+        self._add_tip(cursor_menu, "Pointer highlight color")
+
+        ttk.Separator(frm).grid(row=9, column=0, columnspan=3, sticky="we", pady=8)
 
         rec = ttk.LabelFrame(frm, text="Recording Overlays")
-        rec.grid(row=9, column=0, columnspan=3, sticky="we")
+        rec.grid(row=10, column=0, columnspan=3, sticky="we")
         self.rec_hud = tk.BooleanVar(value=self.cfg.recording.include_hud)
         ttk.Checkbutton(rec, text="Include HUD in recording", variable=self.rec_hud).grid(row=0, column=0, sticky="w")
         self.rec_debug = tk.BooleanVar(value=self.cfg.recording.include_debug)
@@ -2378,12 +2393,12 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
                 return c/12.92 if c <= 0.03928 else ((c+0.055)/1.055) ** 2.4
             r,g,b = [chan(x) for x in rgb]
             return 0.2126*r + 0.7152*g + 0.0722*b
-        fg = hex_to_rgb(cfg.theme.game_fg); bg = hex_to_rgb(cfg.theme.game_bg)
+        fg = hex2rgb(cfg.theme.game_fg); bg = hex2rgb(cfg.theme.game_bg)
         L1, L2 = luminance(fg), luminance(bg)
         ratio = (max(L1,L2)+0.05)/(min(L1,L2)+0.05)
         if ratio < 4.5:
             print(f"Contrast warning for {name}: {ratio:.2f}")
-        bars = [hex_to_rgb(cfg.theme.bar_A), hex_to_rgb(cfg.theme.bar_B), hex_to_rgb(cfg.theme.bar_C), hex_to_rgb(cfg.theme.bar_D)]
+        bars = [hex2rgb(cfg.theme.bar_A), hex2rgb(cfg.theme.bar_B), hex2rgb(cfg.theme.bar_C), hex2rgb(cfg.theme.bar_D)]
         for i in range(4):
             for j in range(i+1,4):
                 diff = sum(abs(bars[i][k]-bars[j][k]) for k in range(3))

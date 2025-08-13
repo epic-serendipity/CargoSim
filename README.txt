@@ -7,21 +7,24 @@ Run:
 
 Highlights
 ---------
-- **Themes:** ten distinct presets with derived tokens; Cyber is pure green on
-  jet black.
+- **Themes:** five distinct presets (GitHub Dark, Classic Light, Solarized
+  Light, Night Ops, Cyber). Cyber remains pure green on jet black.
+- **Cursor Colors:** choose from five named options (Cobalt, Signal Orange,
+  Cyber Lime, Cerulean, Royal Magenta).
 - **Recording Overlays:** presets plus optional statistics for live and offline
   captures.
 - **Seconds/Period:** slider now ranges from 2.00 s down to 0.05 s with a live
-  numeric readout.
+  numeric readout and warning if the async writer is off.
+- **Performance:** HUD text, geometry and history are cached for smoother
+  rendering; ops history bounded to 2000 points.
 
 Themes and Recording
 --------------------
-The **Theme** tab offers ten presets (Classic Light/Dark, Cyber, GitHub
-Light/Dark, Night Ops, Solarized Light/Dark, Desert, Ocean). Presets restyle
-the Tk control panel, Pygame scene, pause menu and fullscreen side panels using
-named tokens rather than hardcoded colors. Aircraft colors are chosen
-independently via the *Airframe Color Map* menu and are never overridden by a
-theme.
+The **Theme** tab offers five presets (GitHub Dark, Classic Light, Solarized
+Light, Night Ops, Cyber). Presets restyle the Tk control panel, Pygame scene,
+pause menu and fullscreen side panels using named tokens rather than hardcoded
+colors. Aircraft colors are chosen independently via the *Airframe Color Map*
+menu and are never overridden by a theme.
 
 Recording requires explicit destinations. The **Recording** tab lets you select
 a folder for live captures and a file path for offline renders; recording will
@@ -71,5 +74,5 @@ Visualizer keys:
 Notes:
 - The ops counter is uncapped now.
 - HOME/END jumps removed.
-- In fullscreen, the left panel shows operational spokes and supply totals/averages. The right panel can show a running Total Ops number, a Total Ops sparkline, or per‑spoke ops counts.
+- In fullscreen, the left panel shows operational spokes and supply totals/averages. The right panel can show a running Total Ops number, a Total Ops sparkline (last 120 points), or per‑spoke ops counts.
 - If MP4 assembly isn't available (no imageio), you'll still get PNG frames you can stitch with another tool.

@@ -11,7 +11,7 @@ Core theme tokens are stored in `ThemeConfig`:
 At runtime the renderer derives:
 - `panel_bg`, `panel_btn`, `panel_btn_fg`
 - `overlay_backdrop_rgba`
-from core tokens using a shared `hex_to_rgb` and `blend(a,b,t)` helper so all
+from core tokens using a shared `hex2rgb` and `blend(a,b,t)` helper so all
 surfaces stay on theme.
 
 Both the interactive `Renderer` and offline `Headless` renderer compute and use
@@ -21,11 +21,15 @@ Presets supply core tokens and may specify a `default_airframe_colorset` for
 first‑run defaults. Switching presets does not modify the user's chosen
 airframe colors.
 
+Cursor highlight color is stored by name in `SimConfig.cursor_color` and mapped
+internally via `CURSOR_COLORS` to fixed hex values. UI elements show only the
+names (Cobalt, Signal Orange, Cyber Lime, Cerulean, Royal Magenta).
+
 ## Visualization
 
 - Right-side fullscreen panel modes:
-  - `ops_total_number` (default) shows a large running total of OFFLOAD ops.
-  - `ops_total_sparkline` plots a sparkline of recent totals.
+- `ops_total_number` (default) shows a large running total of OFFLOAD ops.
+  - `ops_total_sparkline` plots a sparkline of recent totals (up to 120 points).
   - `per_spoke` shows legacy per-spoke bars.
 - Aircraft glyphs can optionally rotate toward their current destination when
   `orient_aircraft` is enabled. On departure from the hub the heading smoothly
@@ -45,6 +49,10 @@ airframe colors.
 The overlay pipeline is: HUD/overlays are drawn onto the Pygame surface → the
 resulting frame is scaled if requested → the writer thread/process encodes the
 frame to MP4 or PNG.
+
+Static text surfaces and hub/spoke geometry are cached to avoid per-frame
+recreation. `ops_total_history` is bounded to the most recent 2000 points to
+prevent unbounded growth.
 
 ## Advanced Decision Making & Gameplay
 
