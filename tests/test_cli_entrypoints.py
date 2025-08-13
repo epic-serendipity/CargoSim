@@ -11,7 +11,7 @@ import cargosim.__main__ as cm
 def test_python_m_cargosim(monkeypatch):
     called = SimpleNamespace(count=0)
 
-    def fake_main():
+    def fake_main(**kwargs):
         called.count += 1
     monkeypatch.setattr(cargo_sim, "main", fake_main)
     monkeypatch.setattr(cm, "gui_main", fake_main)
