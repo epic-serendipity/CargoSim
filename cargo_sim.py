@@ -56,7 +56,7 @@ def tmp_mp4_path(final_path: str) -> str:
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_config.json")
 DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo_sim_debug.log")
-CONFIG_VERSION = 6
+CONFIG_VERSION = 7
 
 # ------------------------- Defaults & Model Parameters -------------------------
 
@@ -71,6 +71,17 @@ D_PERIOD_DAYS_DFLT = 4  # D: 1 every 4 days
 
 # Visual scaling for spoke bars (purely aesthetic; no caps)
 VIS_CAPS_DFLT = (6, 2, 4, 4)  # used for relative bar heights
+
+# Layout constants (safe area padding and side rails)
+SAFE_PAD_PCT = 0.0125
+SAFE_PAD_MIN_PX = 12
+LEFT_RAIL_PCT = 0.09
+LEFT_RAIL_MIN_PX = 120
+RIGHT_RAIL_PCT = 0.14
+RIGHT_RAIL_MIN_PX = 260
+
+def clamp(val, lo, hi):
+    return max(lo, min(hi, val))
 
 # ------------------------- Ops Gate Helper -------------------------
 
@@ -281,6 +292,15 @@ class RecordingConfig:
     record_async_writer: bool = True
     record_max_queue: int = 64
     record_skip_on_backpressure: bool = True
+    record_use_full_resolution: bool = True
+    record_apply_viz_overlays: str = "viz_settings"  # "viz_settings" | "minimal" | "custom"
+    record_overlays_preset: str = "Broadcast"
+    record_right_panel_view: str = "ops_total_sparkline"
+    record_include_side_panels: bool = True
+    record_resolution_mode: str = "display"  # "display" | "custom"
+    record_custom_width: int = 1920
+    record_custom_height: int = 1080
+    last_fullscreen_size: Optional[Tuple[int,int]] = None
     offline_output_path: str = ""
     offline_fmt: str = "mp4"
     offline_fps: int = 30
@@ -305,6 +325,16 @@ class RecordingConfig:
             "record_async_writer": self.record_async_writer,
             "record_max_queue": self.record_max_queue,
             "record_skip_on_backpressure": self.record_skip_on_backpressure,
+            "record_use_full_resolution": self.record_use_full_resolution,
+            "record_apply_viz_overlays": self.record_apply_viz_overlays,
+            "record_overlays_preset": self.record_overlays_preset,
+            "record_right_panel_view": self.record_right_panel_view,
+            "record_include_side_panels": self.record_include_side_panels,
+            "include_panels": self.record_include_side_panels,
+            "record_resolution_mode": self.record_resolution_mode,
+            "record_custom_width": self.record_custom_width,
+            "record_custom_height": self.record_custom_height,
+            "last_fullscreen_size": self.last_fullscreen_size,
             "offline_output_path": self.offline_output_path,
             "offline_fmt": self.offline_fmt,
             "offline_fps": self.offline_fps,
@@ -335,12 +365,22 @@ class RecordingConfig:
         r.record_async_writer = bool(d.get("record_async_writer", r.record_async_writer))
         r.record_max_queue = int(d.get("record_max_queue", r.record_max_queue))
         r.record_skip_on_backpressure = bool(d.get("record_skip_on_backpressure", r.record_skip_on_backpressure))
+        r.record_use_full_resolution = bool(d.get("record_use_full_resolution", r.record_use_full_resolution))
+        r.record_apply_viz_overlays = d.get("record_apply_viz_overlays", r.record_apply_viz_overlays)
+        r.record_overlays_preset = d.get("record_overlays_preset", r.record_overlays_preset)
+        r.record_right_panel_view = d.get("record_right_panel_view", r.record_right_panel_view)
+        r.record_include_side_panels = bool(d.get("record_include_side_panels", d.get("include_panels", r.record_include_side_panels)))
+        r.include_panels = r.record_include_side_panels
+        r.record_resolution_mode = d.get("record_resolution_mode", r.record_resolution_mode)
+        r.record_custom_width = int(d.get("record_custom_width", r.record_custom_width))
+        r.record_custom_height = int(d.get("record_custom_height", r.record_custom_height))
+        size = d.get("last_fullscreen_size", r.last_fullscreen_size)
+        r.last_fullscreen_size = tuple(size) if size else None
         r.offline_progress_poll_ms = int(d.get("offline_progress_poll_ms", r.offline_progress_poll_ms))
         r.fps = int(d.get("fps", r.fps))
         r.frames_per_period = int(d.get("frames_per_period", r.frames_per_period))
         r.include_hud = bool(d.get("include_hud", r.include_hud))
         r.include_debug = bool(d.get("include_debug", r.include_debug))
-        r.include_panels = bool(d.get("include_panels", r.include_panels))
         r.show_watermark = bool(d.get("show_watermark", r.show_watermark))
         r.show_timestamp = bool(d.get("show_timestamp", r.show_timestamp))
         r.show_frame_index = bool(d.get("show_frame_index", r.show_frame_index))
@@ -1262,6 +1302,7 @@ class Renderer:
         self.period_seconds = float(self.sim.cfg.period_seconds)
         self.paused = False
         self.debug_overlay = bool(self.sim.cfg.debug_mode)
+        self.show_safe_area = False
         self.exit_code = None  # "GUI" to return to control panel
         self.menu_open = False
 
@@ -1320,14 +1361,27 @@ class Renderer:
         return surf
 
     def _compute_layout(self):
-        self.cx = self.width // 2
-        self.cy = self.height // 2
-        side_pad = 180 if self.fullscreen else 40
-        self.radius = int(min(self.cx - side_pad, self.cy - 120))
+        w, h = pygame.display.get_surface().get_size()
+        self.width, self.height = w, h
+        pad = max(SAFE_PAD_MIN_PX, round(min(w, h) * SAFE_PAD_PCT))
+        self.pad = pad
+        left_w = max(LEFT_RAIL_MIN_PX, round(w * LEFT_RAIL_PCT))
+        right_w = max(RIGHT_RAIL_MIN_PX, round(w * RIGHT_RAIL_PCT))
+        self.rect_left = pygame.Rect(pad, pad, left_w, h - 2*pad)
+        self.rect_right = pygame.Rect(w - right_w - pad, pad, right_w, h - 2*pad)
+        self.rect_map = pygame.Rect(
+            self.rect_left.right + pad,
+            pad,
+            self.rect_right.left - (self.rect_left.right + 2*pad),
+            h - 2*pad,
+        )
+        self.cx = self.rect_map.centerx
+        self.cy = self.rect_map.centery
+        self.radius = int(min(self.rect_map.width, self.rect_map.height) // 2 - pad)
         self.spoke_pos = []
         self.bar_bases = []
         for idx in range(M):
-            theta = 2*math.pi*idx / M
+            theta = 2 * math.pi * idx / M
             x = self.cx + (self.radius - 20) * math.cos(theta)
             y = self.cy + (self.radius - 20) * math.sin(theta)
             self.spoke_pos.append((x, y))
@@ -1338,12 +1392,14 @@ class Renderer:
         if self.fullscreen:
             self.screen = pygame.display.set_mode((0,0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
             self.width, self.height = self.screen.get_size()
+            self.sim.cfg.recording.last_fullscreen_size = (self.width, self.height)
         else:
             self.screen = pygame.display.set_mode((1200, 850), self.flags)
             self.width, self.height = 1200, 850
         self.sim.cfg.launch_fullscreen = self.fullscreen
         save_config(self.sim.cfg)
         self._compute_layout()
+        self._hud_cache = {}
 
     def draw_spokes(self):
         pygame.draw.circle(self.screen, self.hub_color, (self.cx, self.cy), 10)
@@ -1378,7 +1434,13 @@ class Renderer:
                 label = self.spoke_text[i]
             else:
                 label = self._text(f"S{i+1}", self.font, lbl_col)
-            self.screen.blit(label, (int(x) - label.get_width()//2, int(y) - 26))
+            lx = clamp(int(x), self.rect_map.left + self.pad//2, self.rect_map.right - self.pad//2)
+            ly = clamp(int(y), self.rect_map.top + self.pad//2, self.rect_map.bottom - self.pad//2)
+            draw_x = lx - label.get_width()//2
+            draw_y = ly - 26
+            if draw_y < self.rect_map.top + self.pad//2:
+                draw_y = self.rect_map.top + self.pad//2 + self.font.get_height()
+            self.screen.blit(label, (draw_x, draw_y))
 
     def draw_bars(self):
         bar_w = 8
@@ -1403,14 +1465,14 @@ class Renderer:
         if not surf or surf[0] != title:
             surf = (title, self._text(title, self.bigfont, self.white))
             self._hud_cache["title"] = surf
-        self.screen.blit(surf[1], (20, 16))
+        self.screen.blit(surf[1], (self.pad, self.pad))
 
         help1 = self._hud_cache.get("help")
         if not help1:
             text = "SPACE pause | ←/→ step | +/− speed | D debug | F11 fullscreen | M minimize | G menu | R reset | ESC"
             help1 = (text, self._text(text, self.font, self.grey))
             self._hud_cache["help"] = help1
-        self.screen.blit(help1[1], (20, self.height - 30))
+        self.screen.blit(help1[1], (self.pad, self.height - self.pad - help1[1].get_height()))
 
         if self.recorder.frames_dropped > 0:
             msg = f"Dropped frames: {self.recorder.frames_dropped}"
@@ -1418,7 +1480,7 @@ class Renderer:
             if not drop or drop[0] != msg:
                 drop = (msg, self._text(msg, self.font, self.bad_spoke_col))
                 self._hud_cache["drop"] = drop
-            self.screen.blit(drop[1], (20, 40))
+            self.screen.blit(drop[1], (self.pad, self.pad + 24))
 
         if self.sim.cfg.debug_mode and self.sim.integrity_violations:
             msg = f"Integrity: {len(self.sim.integrity_violations)}"
@@ -1426,7 +1488,7 @@ class Renderer:
             if not integ or integ[0] != msg:
                 integ = (msg, self._text(msg, self.font, self.bad_spoke_col))
                 self._hud_cache["integrity"] = integ
-            self.screen.blit(integ[1], (20, 60))
+            self.screen.blit(integ[1], (self.pad, self.pad + 44))
 
     def draw_aircraft(self, actions_this_period: List[Tuple[str,str]], alpha: float):
         moves_by_ac: Dict[str, List[Tuple[str,str]]] = {}
@@ -1535,19 +1597,18 @@ class Renderer:
     def draw_fullscreen_side_panels(self):
         if not self.fullscreen:
             return
-        pad = 18
-        panel_w = 160
-        left_rect = pygame.Rect(0, 0, panel_w, self.height)
-        right_rect = pygame.Rect(self.width - panel_w, 0, panel_w, self.height)
-        pygame.draw.rect(self.screen, self.panel_bg, left_rect)
-        pygame.draw.rect(self.screen, self.panel_bg, right_rect)
+        pad = self.pad
+        pygame.draw.rect(self.screen, self.panel_bg, self.rect_left)
+        pygame.draw.rect(self.screen, self.panel_bg, self.rect_right)
+        left_inner = self.rect_left.inflate(-pad*0.8, -pad*0.8)
+        right_inner = self.rect_right.inflate(-pad*0.8, -pad*0.8)
 
         # Left: operational spokes
         ops = self.sim.ops_count()
         max_ops = self.sim.M
-        bar_h = int(self.height*0.25)
-        bar_x = 24
-        bar_y = 60
+        bar_h = int(left_inner.height*0.25)
+        bar_x = left_inner.x
+        bar_y = left_inner.y
         pygame.draw.rect(self.screen, self.panel_btn, (bar_x, bar_y, 24, bar_h), border_radius=6)
         fill_h = int(bar_h * (ops / max_ops if max_ops else 1))
         pygame.draw.rect(self.screen, self.good_spoke_col, (bar_x, bar_y + (bar_h - fill_h), 24, fill_h), border_radius=6)
@@ -1575,8 +1636,9 @@ class Renderer:
 
         # Right panel modes
         mode = self.sim.cfg.right_panel_view
-        rx = self.width - panel_w
-        base_y = 60
+        rx = right_inner.x
+        base_y = right_inner.y
+        panel_w = right_inner.width
         if mode == "ops_total_number":
             total = self.sim.ops_total_history[-1] if self.sim.ops_total_history else 0
             title = self.font.render("Total Ops", True, self.white)
@@ -1585,7 +1647,7 @@ class Renderer:
             self.screen.blit(num, (rx + (panel_w - num.get_width())//2, base_y + 40))
         elif mode == "ops_total_sparkline":
             hist = self.sim.ops_total_history
-            rect = pygame.Rect(rx + pad, base_y, panel_w - 2*pad, 120)
+            rect = pygame.Rect(rx, base_y, panel_w, 120)
             pygame.draw.rect(self.screen, self.panel_bg, rect, border_radius=6)
             N = min(120, len(hist))
             if N >= 2:
@@ -1608,11 +1670,11 @@ class Renderer:
             row_h = 24
             for i in range(self.sim.M):
                 y = base_y + i*row_h
-                pygame.draw.rect(self.screen, self.panel_btn, (rx + pad, y, panel_w - 2*pad, 12), border_radius=6)
-                w = int((panel_w - 2*pad) * (ops_counts[i] / max_ops_spoke))
-                pygame.draw.rect(self.screen, self.good_spoke_col, (rx + pad, y, w, 12), border_radius=6)
+                pygame.draw.rect(self.screen, self.panel_btn, (rx, y, panel_w, 12), border_radius=6)
+                w = int(panel_w * (ops_counts[i] / max_ops_spoke))
+                pygame.draw.rect(self.screen, self.good_spoke_col, (rx, y, w, 12), border_radius=6)
                 lbl = self.font.render(f"S{i+1}", True, self.white)
-                self.screen.blit(lbl, (rx + pad, y - 18))
+                self.screen.blit(lbl, (rx, y - 18))
 
     # --- Pause Menu ---
     def draw_pause_menu(self):
@@ -1690,10 +1752,16 @@ class Renderer:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                elif event.type == pygame.VIDEORESIZE:
-                    self.width, self.height = event.w, event.h
-                    self.screen = pygame.display.set_mode((self.width, self.height), self.flags)
+                elif event.type in (pygame.VIDEORESIZE, pygame.WINDOWSIZECHANGED):
+                    if event.type == pygame.VIDEORESIZE:
+                        self.width, self.height = event.w, event.h
+                        self.screen = pygame.display.set_mode((self.width, self.height), self.flags)
+                    else:
+                        self.width, self.height = pygame.display.get_surface().get_size()
+                    if self.fullscreen:
+                        self.sim.cfg.recording.last_fullscreen_size = (self.width, self.height)
                     self._compute_layout()
+                    self._hud_cache = {}
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self.paused = True
@@ -1723,6 +1791,8 @@ class Renderer:
                         accum = 0.0
                     elif event.key == pygame.K_d and not self.menu_open:
                         self.debug_overlay = not self.debug_overlay
+                    elif event.key == pygame.K_F2 and not self.menu_open:
+                        self.show_safe_area = not self.show_safe_area
                     elif event.key == pygame.K_g and not self.menu_open:
                         self.exit_code = "GUI"
                         running = False
@@ -1756,6 +1826,10 @@ class Renderer:
                 self.draw_fullscreen_side_panels()
             if self.debug_overlay and ((not self.recorder.live) or rc.include_debug):
                 self.draw_debug_overlay()
+            if self.show_safe_area:
+                pygame.draw.rect(self.screen, self.grey, self.rect_left, 1)
+                pygame.draw.rect(self.screen, self.grey, self.rect_map, 1)
+                pygame.draw.rect(self.screen, self.grey, self.rect_right, 1)
             if self.menu_open:
                 self.draw_pause_menu()
             self.draw_recording_overlays()
@@ -1808,7 +1882,15 @@ def render_offline(cfg: SimConfig):
     os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     import pygame as pg
     pg.init()
-    w, h = 1200, 850
+    rc = cfg.recording
+    cfg.right_panel_view = rc.record_right_panel_view
+    if rc.record_resolution_mode == "display":
+        if rc.last_fullscreen_size:
+            w, h = rc.last_fullscreen_size
+        else:
+            w, h = (1920, 1080)
+    else:
+        w, h = rc.record_custom_width, rc.record_custom_height
 
     # Build sim and a faux renderer that draws onto our surface without display
     class Headless(Renderer):
@@ -1846,7 +1928,6 @@ def render_offline(cfg: SimConfig):
     sim = LogisticsSim(cfg)
     rnd = Headless(sim)
 
-    rc = cfg.recording
     frames_per_period = max(1, rc.frames_per_period)
 
     fmt = rc.offline_fmt
@@ -1866,8 +1947,11 @@ def render_offline(cfg: SimConfig):
                 rnd.screen.fill(rnd.bg)
                 rnd.draw_spokes()
                 rnd.draw_bars()
-                rnd.draw_hud()
+                if rc.include_hud:
+                    rnd.draw_hud()
                 rnd.draw_aircraft(actions, alpha)
+                if rc.include_panels:
+                    rnd.draw_fullscreen_side_panels()
                 recorder.capture(rnd.screen)
             sim.step_period()
         out_path = recorder.close()
