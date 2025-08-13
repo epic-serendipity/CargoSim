@@ -46,6 +46,9 @@ names (Cobalt, Signal Orange, Cyber Lime, Cerulean, Royal Magenta).
   background process and shows progress with Cancel/Reveal buttons. Polling
   cadence is configurable.
 - All saved paths are normalized to absolute form in the config file.
+- Headless offline rendering creates a hidden 1×1 display using the SDL "dummy"
+  driver so that surface conversions like `convert_alpha()` succeed without a
+  visible window.
 The overlay pipeline is: HUD/overlays are drawn onto the Pygame surface → the
 resulting frame is scaled if requested → the writer thread/process encodes the
 frame to MP4 or PNG.
