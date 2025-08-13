@@ -1,4 +1,5 @@
-# CargoSim
+# CargoSim (WIP)
+*All features subject to change or deprication.*
 
 CargoSim models a hub-and-spoke airlift network with daily AM/PM cadence. Aircraft ferry supplies to spokes and operations consume resources.
 
@@ -22,28 +23,13 @@ Key highlights: `SPACE` pause, `←/→` step, `+/-` speed, `R` reset, `D` debug
 
 ## Recording
 Live recording writes MP4 or PNG when a folder is set. Offline rendering requires a file path and runs atomically with progress and cancel options.
-
-## Gameplay Tab
-- Realism: distance affects leg times.
-- Fleet Optimization: configurable weights.
-
 ## Advanced Decision Making
 Fairness cooldown, A/B target DoS, emergency A preempt, deterministic RNG seed.
-
-## Determinism & Invariants
-Seed options enable reproducibility. Invariants log or assert non‑negative stocks and correct C/D usage on ops.
 
 ## Scenarios & Batch
 Use `--scenario` and `--runs` to batch simulations; results emit CSV/JSON.
 
-## Theming
-Presets affect UI and renderer. Cyber theme is strictly green on black with pulsing warnings.
-
 ## Troubleshooting
 Missing deps? install `pygame` or `imageio-ffmpeg`. Check codecs, file permissions, and fullscreen/windowing quirks.
-
-## License
-MIT
-
 ## Contributing & Code of Conduct
 PRs welcome. By participating you agree to the [Contributor Covenant](CODE_OF_CONDUCT.md) code of conduct.
