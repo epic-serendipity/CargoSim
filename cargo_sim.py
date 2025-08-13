@@ -6,8 +6,9 @@ import copy
 import time
 import subprocess
 import threading
+import shutil
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Literal
 from types import SimpleNamespace
 
 # --- Tk first (always available on Win/macOS, may require apt on Linux) ---
@@ -958,38 +959,96 @@ class LogisticsSim:
 # ------------------------- Recording Helpers -------------------------
 
 class Recorder:
-    def __init__(self, cfg: RecordingConfig, period_seconds: float):
-        self.cfg = cfg
-        self.live = cfg.record_live_enabled
-        self.period_seconds = period_seconds
+    def __init__(
+        self,
+        *,
+        mode: Literal["live", "offline"],
+        folder: Optional[str] = None,
+        file_path: Optional[str] = None,
+        fps: int,
+        fmt: str,
+        async_writer: bool = False,
+        max_queue: int = 64,
+        drop_on_backpressure: bool = True,
+    ):
+        fmt = fmt.lower()
+        if fmt not in ("mp4", "png"):
+            raise ValueError("fmt must be 'mp4' or 'png'")
+        if fmt == "mp4" and not _HAS_IMAGEIO:
+            raise RuntimeError("MP4 recording requires imageio and imageio-ffmpeg")
+
+        self.mode = mode
+        self.live = (mode == "live")
+        self.fps = fps
+        self.fmt = fmt
         self.frame_idx = 0
         self.frames_dropped = 0
         self.queue: Optional["queue.Queue"] = None
         self.thread: Optional[threading.Thread] = None
         self.writer = None
         self.out_path: Optional[str] = None
-        if not self.live:
-            return
-        os.makedirs(cfg.record_live_folder, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        if cfg.record_live_format.lower() == "mp4" and _HAS_IMAGEIO:
-            self.out_path = os.path.join(cfg.record_live_folder, f"session_{ts}.mp4")
-            if cfg.record_async_writer:
-                import queue
-                self.queue = queue.Queue(maxsize=cfg.record_max_queue)
-                self.thread = threading.Thread(target=self._worker_mp4, daemon=True)
-                self.thread.start()
+        self.drop_on_backpressure = drop_on_backpressure
+
+        if self.live:
+            if not folder:
+                self.live = False
+                return
+            os.makedirs(folder, exist_ok=True)
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            if fmt == "mp4":
+                self.out_path = os.path.join(folder, f"session_{ts}.mp4")
+                if async_writer:
+                    import queue
+                    self.queue = queue.Queue(maxsize=max_queue)
+                    self.thread = threading.Thread(target=self._worker_mp4, daemon=True)
+                    self.thread.start()
+                else:
+                    self.writer = imageio.get_writer(self.out_path, fps=fps, codec="libx264", quality=8)  # type: ignore
             else:
-                self.writer = imageio.get_writer(self.out_path, fps=cfg.fps, codec="libx264", quality=8)  # type: ignore
+                self.frame_dir = os.path.join(folder, "frames", f"session_{ts}")
+                os.makedirs(self.frame_dir, exist_ok=True)
+                self.out_path = self.frame_dir
+                if async_writer:
+                    import queue
+                    self.queue = queue.Queue(maxsize=max_queue)
+                    self.thread = threading.Thread(target=self._worker_png, daemon=True)
+                    self.thread.start()
         else:
-            self.frame_dir = os.path.join(cfg.record_live_folder, "frames", f"session_{ts}")
-            os.makedirs(self.frame_dir, exist_ok=True)
-            self.out_path = self.frame_dir
-            if cfg.record_async_writer:
-                import queue
-                self.queue = queue.Queue(maxsize=cfg.record_max_queue)
-                self.thread = threading.Thread(target=self._worker_png, daemon=True)
-                self.thread.start()
+            if not file_path:
+                raise ValueError("file_path required for offline recorder")
+            self.out_path = file_path
+            if fmt == "mp4":
+                self.tmp_path = file_path + ".part"
+                self.writer = imageio.get_writer(self.tmp_path, fps=fps, codec="libx264", quality=8)  # type: ignore
+            else:
+                stem, _ = os.path.splitext(file_path)
+                self.frame_dir_tmp = stem + "_frames.part"
+                self.frame_dir = stem + "_frames"
+                os.makedirs(self.frame_dir_tmp, exist_ok=True)
+
+    @classmethod
+    def for_live(
+        cls,
+        folder: str,
+        fps: int,
+        fmt: str,
+        async_writer: bool,
+        max_queue: int,
+        drop_on_backpressure: bool,
+    ) -> "Recorder":
+        return cls(
+            mode="live",
+            folder=folder,
+            fps=fps,
+            fmt=fmt,
+            async_writer=async_writer,
+            max_queue=max_queue,
+            drop_on_backpressure=drop_on_backpressure,
+        )
+
+    @classmethod
+    def for_offline(cls, file_path: str, fps: int, fmt: str) -> "Recorder":
+        return cls(mode="offline", file_path=file_path, fps=fps, fmt=fmt)
 
     def _enqueue(self, arr):
         if not self.queue:
@@ -998,7 +1057,7 @@ class Recorder:
         try:
             self.queue.put_nowait(arr)
         except Exception:
-            if self.cfg.record_skip_on_backpressure:
+            if self.drop_on_backpressure:
                 self.frames_dropped += 1
             else:
                 try:
@@ -1007,21 +1066,25 @@ class Recorder:
                     self.frames_dropped += 1
 
     def capture(self, surface):
-        if not self.live:
+        if not self.live and self.mode != "offline":
+            return
+        if self.fmt == "png" and not self.live:
+            path = os.path.join(self.frame_dir_tmp, f"frame_{self.frame_idx:06d}.png")
+            pygame.image.save(surface, path)
+            self.frame_idx += 1
             return
         surf = surface
-        if self.cfg.scale_percent != 100:
-            w = int(surface.get_width() * self.cfg.scale_percent / 100)
-            h = int(surface.get_height() * self.cfg.scale_percent / 100)
-            surf = pygame.transform.smoothscale(surface, (w, h))
-        arr = pygame.surfarray.array3d(surf).swapaxes(0,1)
-        self._enqueue(arr)
+        arr = pygame.surfarray.array3d(surf).swapaxes(0, 1)
+        if self.live:
+            self._enqueue(arr)
+        else:
+            self._write_frame(arr)
         self.frame_idx += 1
 
     def _write_frame(self, arr):
-        if self.cfg.record_live_format.lower() == "mp4" and _HAS_IMAGEIO:
+        if self.fmt == "mp4":
             if not self.writer:
-                self.writer = imageio.get_writer(self.out_path, fps=self.cfg.fps, codec="libx264", quality=8)  # type: ignore
+                return
             self.writer.append_data(arr)  # type: ignore
         else:
             import imageio
@@ -1030,7 +1093,7 @@ class Recorder:
 
     def _worker_mp4(self):
         import queue
-        writer = imageio.get_writer(self.out_path, fps=self.cfg.fps, codec="libx264", quality=8)  # type: ignore
+        writer = imageio.get_writer(self.out_path, fps=self.fps, codec="libx264", quality=8)  # type: ignore
         while True:
             try:
                 arr = self.queue.get()
@@ -1056,14 +1119,33 @@ class Recorder:
             idx += 1
 
     def finalize(self):
-        if not self.live:
-            return None
-        if self.queue and self.thread:
-            self.queue.put(None)
-            self.thread.join(timeout=5)
-        elif self.writer:
-            self.writer.close()
-        return self.out_path
+        if self.live:
+            if self.queue and self.thread:
+                self.queue.put(None)
+                self.thread.join(timeout=5)
+            elif self.writer:
+                self.writer.close()
+            return self.out_path
+        else:
+            if self.fmt == "mp4" and self.writer:
+                self.writer.close()
+                os.replace(self.tmp_path, self.out_path)
+            elif self.fmt == "png":
+                os.replace(self.frame_dir_tmp, self.frame_dir)
+                self.out_path = self.frame_dir
+            return self.out_path
+
+
+class NullRecorder:
+    live = False
+    frames_dropped = 0
+    frame_idx = 0
+
+    def capture(self, _surface):
+        return
+
+    def finalize(self):
+        return None
 
 # ------------------------- Pygame Renderer -------------------------
 
@@ -1106,7 +1188,17 @@ class Renderer:
         fmt = "mp4" if (rcfg.record_live_format.lower() == "mp4" and _HAS_IMAGEIO) else "png"
         if rcfg.record_live_enabled and rcfg.record_live_format.lower() == "mp4" and not _HAS_IMAGEIO:
             self.debug_lines.append("MP4 requires imageio + imageio-ffmpeg; recording PNG frames instead.")
-        self.recorder = Recorder(rcfg, self.period_seconds)
+        if rcfg.record_live_enabled:
+            self.recorder = Recorder.for_live(
+                folder=rcfg.record_live_folder,
+                fps=rcfg.fps,
+                fmt=fmt,
+                async_writer=rcfg.record_async_writer,
+                max_queue=rcfg.record_max_queue,
+                drop_on_backpressure=rcfg.record_skip_on_backpressure,
+            )
+        else:
+            self.recorder = NullRecorder()
 
         # Pause menu button rects
         self._pm_rects = {}
@@ -1638,16 +1730,13 @@ def render_offline(cfg: SimConfig):
     class Headless(Renderer):
         def __init__(self, sim):
             os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-            if not pygame.display.get_init():
-                pygame.display.init()
+            pygame.display.init()
             pygame.display.set_mode((1, 1), flags=pygame.HIDDEN)
-            # do not call display.set_mode for main surface
             self.sim = sim
             self.width, self.height = w, h
             self.screen = pygame.Surface((self.width, self.height), flags=pygame.SRCALPHA)
             self.clock = None
 
-            # ensure attributes used by _compute_layout / draw paths exist
             self.fullscreen = False
             self.flags = 0
 
@@ -1664,27 +1753,22 @@ def render_offline(cfg: SimConfig):
             self.period_seconds = float(self.sim.cfg.period_seconds)
             self.debug_overlay = False
             self.paused = False
-            self.recorder = Recorder(live=False, out_dir="", fps=0, fmt="PNG frames")
+            self.recorder = NullRecorder()
             self._last_heading_by_ac = {}
 
-        def run(self): pass  # not used
+        def run(self):
+            pass
 
     sim = LogisticsSim(cfg)
     rnd = Headless(sim)
 
     rc = cfg.recording
     frames_per_period = max(1, rc.frames_per_period)
-    total_frames = cfg.periods * frames_per_period
 
-    # writer
-    write_mp4 = (_HAS_IMAGEIO and rc.offline_output_path.lower().endswith(".mp4"))
-    if write_mp4:
-        writer = imageio.get_writer(rc.offline_output_path, fps=rc.fps, codec="libx264", quality=8)  # type: ignore
-    else:
-        out_dir = os.path.splitext(rc.offline_output_path)[0] + "_frames"
-        os.makedirs(out_dir, exist_ok=True)
+    out_file = rc.offline_output_path or os.path.join(os.getcwd(), "offline_render.mp4")
+    fmt = "mp4" if (_HAS_IMAGEIO and out_file.lower().endswith(".mp4")) else "png"
+    recorder = Recorder.for_offline(file_path=out_file, fps=rc.fps, fmt=fmt)
 
-    frame_idx = 0
     for period in range(cfg.periods):
         actions = sim.actions_log[-1] if sim.actions_log else []
         for f in range(frames_per_period):
@@ -1694,19 +1778,12 @@ def render_offline(cfg: SimConfig):
             rnd.draw_bars()
             rnd.draw_hud()
             rnd.draw_aircraft(actions, alpha)
-            if write_mp4:
-                arr = pg.surfarray.array3d(rnd.screen).swapaxes(0,1)
-                writer.append_data(arr)  # type: ignore
-            else:
-                frame_file = os.path.join(out_dir, f"frame_{frame_idx:06d}.png")
-                pg.image.save(rnd.screen, frame_file)
-            frame_idx += 1
+            recorder.capture(rnd.screen)
         sim.step_period()
 
-    if write_mp4:
-        writer.close()
+    out_path = recorder.finalize()
     pg.quit()
-    return rc.offline_output_path if write_mp4 else out_dir
+    return out_path
 
 # ------------------------- Tkinter Control GUI -------------------------
 
@@ -2265,6 +2342,16 @@ class ControlGUI:
             self.render_proc.terminate()
             self.render_status.set("Render cancelled")
             self.cancel_render_btn.state(["disabled"])
+            part = self.cfg.recording.offline_output_path + ".part"
+            frames_part = os.path.splitext(self.cfg.recording.offline_output_path)[0] + "_frames.part"
+            for p in [part, frames_part]:
+                if os.path.isdir(p):
+                    shutil.rmtree(p, ignore_errors=True)
+                elif os.path.isfile(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
             self.render_proc = None
 
     def reveal_render(self):
