@@ -32,7 +32,7 @@ def test_enhanced_features():
         # Create renderer
         renderer = Renderer(sim, force_windowed=True)
         
-        print("✓ Renderer created successfully")
+        print("Renderer created successfully")
         
         # Test aircraft state mapping
         test_states = [
@@ -41,15 +41,16 @@ def test_enhanced_features():
             ("LEG1_ENROUTE", "HUB", "ENROUTE"),
             ("AT_SPOKEA", "S1", "UNLOADING"),
             ("AT_SPOKEB_ENROUTE", "S1", "ENROUTE"),
-            ("AT_SPOKEB", "S2", "UNLOADING")
+            ("AT_SPOKEB", "S2", "UNLOADING"),
+            ("RETURN_ENROUTE", "S2", "ENROUTE")
         ]
         
         for sim_state, location, expected_visual in test_states:
             actual = renderer._map_aircraft_state(sim_state, location)
             if actual == expected_visual:
-                print(f"✓ State mapping: {sim_state}@{location} → {actual}")
+                print(f"State mapping: {sim_state}@{location} → {actual}")
             else:
-                print(f"✗ State mapping: {sim_state}@{location} → {actual} (expected {expected_visual})")
+                print(f"State mapping: {sim_state}@{location} → {actual} (expected {expected_visual})")
         
         # Test bar scaling modes
         print("\nTesting bar scaling modes...")
@@ -57,16 +58,16 @@ def test_enhanced_features():
         # Test linear mode
         renderer.set_bar_scaling_mode("linear")
         if renderer.bar_scaling_mode == "linear":
-            print("✓ Linear mode set successfully")
+            print("Linear mode set successfully")
         else:
-            print("✗ Failed to set linear mode")
+            print("Failed to set linear mode")
         
         # Test geometric mode
         renderer.set_bar_scaling_mode("geometric", 0.6)
         if renderer.bar_scaling_mode == "geometric" and renderer.bar_gamma == 0.6:
-            print("✓ Geometric mode set successfully with gamma=0.6")
+            print("Geometric mode set successfully with gamma=0.6")
         else:
-            print("✗ Failed to set geometric mode")
+            print("Failed to set geometric mode")
         
         # Test bar height calculation
         test_values = [0.0, 1.0, 2.0, 4.0, 8.0]
@@ -82,21 +83,21 @@ def test_enhanced_features():
         print("\nTesting animation toggle...")
         renderer.toggle_bar_animation(False)
         if not renderer.bar_animation_enabled:
-            print("✓ Animation disabled successfully")
+            print("Animation disabled successfully")
         else:
-            print("✗ Failed to disable animation")
+            print("Failed to disable animation")
         
         renderer.toggle_bar_animation(True)
         if renderer.bar_animation_enabled:
-            print("✓ Animation enabled successfully")
+            print("Animation enabled successfully")
         else:
-            print("✗ Failed to enable animation")
+            print("Failed to enable animation")
         
-        print("\n✓ All tests completed successfully!")
+        print("\nAll tests completed successfully!")
         return True
         
     except Exception as e:
-        print(f"✗ Test failed with error: {e}")
+        print(f"Test failed with error: {e}")
         import traceback
         traceback.print_exc()
         return False

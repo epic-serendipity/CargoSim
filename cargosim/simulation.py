@@ -24,7 +24,7 @@ class Aircraft:
     cap: int           # capacity
     name: str
     location: str = "HUB"  # "HUB" or "S{1..10}"
-    state: str = "IDLE"    # IDLE, LEG1_ENROUTE, AT_SPOKEA, AT_SPOKEB_ENROUTE, AT_SPOKEB
+    state: str = "IDLE"    # IDLE, LEG1_ENROUTE, AT_SPOKEA, AT_SPOKEB_ENROUTE, AT_SPOKEB, RETURN_ENROUTE
     plan: Optional[Tuple[int, Optional[int]]] = None  # (i, j|None)
     payload_A: List[int] = field(default_factory=lambda: [0,0,0,0])
     payload_B: List[int] = field(default_factory=lambda: [0,0,0,0])
@@ -217,7 +217,9 @@ class LogisticsSim:
 
             # progress in-flight states
             if ac.state == "LEG1_ENROUTE":
+                i = ac.plan[0] if ac.plan else 0
                 ac.state = "AT_SPOKEA"
+                ac.location = f"S{i+1}"
             if ac.state == "AT_SPOKEA":
                 i = ac.plan[0]
                 self.arrivals_next[i].append(ac.payload_A[:])
@@ -229,18 +231,19 @@ class LogisticsSim:
                 if events < 2:
                     if ac.plan[1] is not None:
                         j = ac.plan[1]
-                        ac.location = f"S{j+1}"
                         ac.state = "AT_SPOKEB_ENROUTE"
                         actions_this_period.append((ac.name, f"MOVE S{i+1}→S{j+1}"))
                         consume_event()
                     else:
-                        ac.location = "HUB"
-                        ac.state = "IDLE"
+                        ac.plan = None
+                        ac.state = "RETURN_ENROUTE"
                         actions_this_period.append((ac.name, f"MOVE S{i+1}→HUB"))
                         consume_event()
                 continue
             if ac.state == "AT_SPOKEB_ENROUTE":
+                j = ac.plan[1] if ac.plan else 0
                 ac.state = "AT_SPOKEB"
+                ac.location = f"S{j+1}"
             if ac.state == "AT_SPOKEB":
                 j = ac.plan[1]
                 self.arrivals_next[j].append(ac.payload_B[:])
@@ -250,10 +253,14 @@ class LogisticsSim:
                 ac.payload_B = [0,0,0,0]
                 consume_event()
                 if events < 2:
-                    ac.location = "HUB"
-                    ac.state = "IDLE"
+                    ac.plan = None
+                    ac.state = "RETURN_ENROUTE"
                     actions_this_period.append((ac.name, f"MOVE S{j+1}→HUB"))
                     consume_event()
+                continue
+            if ac.state == "RETURN_ENROUTE":
+                ac.location = "HUB"
+                ac.state = "IDLE"
                 continue
 
             # new sortie
@@ -297,7 +304,6 @@ class LogisticsSim:
                 ac.payload_A = p_i[:]
                 ac.payload_B = p_j[:] if not leg2_none else [0,0,0,0]
                 actions_this_period.append((ac.name, f"ONLOAD@HUB→S{i+1}"))
-                ac.location = f"S{i+1}"
                 ac.state = "LEG1_ENROUTE"
                 actions_this_period.append((ac.name, f"MOVE HUB→S{i+1}"))
                 consume_event(); consume_event()
@@ -348,7 +354,6 @@ class LogisticsSim:
                     # Force at least one aircraft to move to prevent deadlock
                     for ac in self.fleet:
                         if ac.at_hub() and ac.state == "IDLE":
-                            ac.location = "S1"
                             ac.state = "LEG1_ENROUTE"
                             ac.plan = (0, None)
                             ac.payload_A = [1, 1, 0, 0]

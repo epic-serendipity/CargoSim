@@ -118,6 +118,16 @@ class TestLogisticsSim:
         success = sim.run_op(0, 1)
         assert success is False
 
+    def test_aircraft_travel_time(self, sim):
+        """Ensure aircraft movement has travel time."""
+        ac = sim.fleet[0]
+        ac.plan = (0, None)
+        ac.state = "LEG1_ENROUTE"
+        ac.location = "HUB"
+        assert ac.location == "HUB"
+        sim.step_period()
+        assert ac.location == "S1"
+
 
 class TestUtilityFunctions:
     """Test utility functions."""
