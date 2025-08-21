@@ -2,7 +2,7 @@
 
 A professional, modular Python package for simulating hub-and-spoke airlift networks with daily AM/PM cadence. Aircraft ferry supplies to spokes and operations consume resources.
 
-## 🚀 Quickstart
+## Quickstart
 
 ### Installation
 ```bash
@@ -28,7 +28,7 @@ python -m cargosim --headless --periods 10 --seed 42
 python -m cargosim --windowed
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 CargoSim is built with a professional, modular architecture:
 
@@ -45,27 +45,27 @@ cargosim/
 └── main.py             # Main entry points and dependency management
 ```
 
-## 🎮 Core Concepts
+## Core Concepts
 
 - **Periods**: Alternate AM/PM; arrivals apply at the next period
 - **Operations**: Can run only when a spoke has A, B, C, and D resources on hand
 - **Resource Consumption**: Each operation consumes one unit of C and D
 - **Resource Gating**: A and B gate operations per PM but are not consumed
 
-## ✨ Features
+## Features
 
-### 🎨 Visual Themes
+### Visual Themes
 - **Five Built-in Themes**: GitHub Dark, Classic Light, Solarized Light, Night Ops, Cyber
 - **Customizable**: Cursor colors, overlay presets, aircraft color schemes
 - **Responsive**: Fullscreen and windowed modes with dynamic layout
 
-### 📹 Recording System
+### Recording System
 - **Live Recording**: MP4 or PNG with async processing
 - **Offline Rendering**: Batch processing with progress tracking
 - **Flexible Output**: Customizable resolution, FPS, and format options
 - **Performance**: Dropped-frame detection and queue management
 
-### 🎯 Control Panel
+### Control Panel
 - **Configuration Tab**: Fleet settings, initial stocks, consumption cadence
 - **Scheduling Tab**: Pair order, advanced decision making, statistics
 - **Visual Tab**: Display options, side panels, cursor customization
@@ -74,7 +74,7 @@ cargosim/
 - **Recording Tab**: Live and offline recording configuration
 - **Start Tab**: Save configuration and launch simulation
 
-### 🎮 Gameplay Controls
+### Gameplay Controls
 - **SPACE**: Pause/Resume
 - **←/→**: Step forward/backward
 - **+/-**: Adjust simulation speed
@@ -83,7 +83,7 @@ cargosim/
 - **ESC**: Open pause menu
 - **F11**: Toggle fullscreen
 
-## 🔧 Advanced Features
+## Advanced Features
 
 ### Decision Making
 - **Fairness Cooldown**: Prevents aircraft from being overworked
@@ -101,7 +101,7 @@ cargosim/
 - **Persistence**: Automatic saving of user preferences and settings
 - **Flexibility**: Support for custom fleet configurations and scenarios
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -114,7 +114,7 @@ pytest tests/test_simulation.py
 pytest --cov=cargosim tests/
 ```
 
-## 📚 API Reference
+## API Reference
 
 ### Core Classes
 ```python
@@ -155,7 +155,7 @@ logger = get_logger("simulation")
 logger.info("Simulation started")
 ```
 
-## 🚨 Troubleshooting
+## Troubleshooting
 
 ### Missing Dependencies
 ```bash
@@ -172,7 +172,7 @@ pip install imageio-ffmpeg
 - **Performance**: Check debug logs for dropped frames or memory issues
 - **Recording**: Verify file permissions and available disk space
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! The modular architecture makes it easy to:
 
@@ -189,16 +189,14 @@ pip install -e .[dev]
 pytest tests/
 ```
 
-## 📄 License
+## License
 
 This project is open source. See LICENSE file for details.
 
-## 🆘 Support
+## Support
 
 - **Issues**: Report bugs and feature requests on GitHub
 - **Documentation**: Check the code docstrings and this README
 - **Community**: Join discussions in the project repository
 
----
-
-*CargoSim - Professional logistics simulation with a modular, maintainable architecture.*
+--- *CargoSim - Professional logistics simulation with a modular, maintainable architecture.*

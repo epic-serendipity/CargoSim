@@ -1,6 +1,6 @@
 # Project Map - CargoSim Modular Architecture
 
-## 🏗️ **Package Structure**
+## **Package Structure**
 
 CargoSim has been refactored into a professional, modular Python package:
 
@@ -17,7 +17,7 @@ cargosim/
 └── main.py             # Main entry points and dependency management
 ```
 
-## 🎨 **Theme System**
+## **Theme System**
 
 Core theme tokens are stored in `ThemeConfig`:
 - `menu_theme` (dark/light)
@@ -38,7 +38,7 @@ Presets supply core tokens and may specify a `default_airframe_colorset` for fir
 
 Cursor highlight color is stored by name in `SimConfig.cursor_color` and mapped internally via `CURSOR_COLORS` to fixed hex values. UI elements show only the names (Cobalt, Signal Orange, Cyber Lime, Cerulean, Royal Magenta).
 
-## 🖥️ **Visualization & Rendering**
+## **Visualization & Rendering**
 
 ### Right-side Fullscreen Panel Modes
 - `ops_total_number` (default) shows a large running total of OFFLOAD operations
@@ -56,7 +56,7 @@ Cursor highlight color is stored by name in `SimConfig.cursor_color` and mapped 
 - Responsive design that adapts to window resizing
 - Cached font rendering and HUD elements for performance
 
-## 📹 **Recording System**
+## **Recording System**
 
 ### Live Recording
 - Disabled until the user selects an existing output folder
@@ -81,7 +81,7 @@ Cursor highlight color is stored by name in `SimConfig.cursor_color` and mapped 
 - `ops_total_history` is bounded to most recent 2000 points
 - Async processing prevents GUI blocking during recording
 
-## 🎮 **Advanced Decision Making & Gameplay**
+## **Advanced Decision Making & Gameplay**
 
 ### Configuration Structure
 - `SimConfig.adm` holds fairness cooldowns, target days-of-supply for A/B, emergency preemption toggle, and deterministic seed
@@ -93,7 +93,7 @@ Cursor highlight color is stored by name in `SimConfig.cursor_color` and mapped 
 - **Emergency Preemption**: Priority handling for critical resources
 - **Deterministic RNG**: Reproducible simulation results with configurable seeds
 
-## 🔧 **Configuration & Validation**
+## **Configuration & Validation**
 
 ### Configuration Management
 - Comprehensive configuration validation with `validate_config()` function
@@ -108,7 +108,7 @@ Cursor highlight color is stored by name in `SimConfig.cursor_color` and mapped 
 - Pair order structure validation
 - Theme and color validation
 
-## 📊 **Performance & Optimization**
+## **Performance & Optimization**
 
 ### Caching System
 - `@lru_cache` for spoke position calculations
@@ -121,7 +121,7 @@ Cursor highlight color is stored by name in `SimConfig.cursor_color` and mapped 
 - Bounded data structures to prevent unbounded growth
 - Optimized rendering pipeline with minimal object creation
 
-## 🧪 **Testing & Quality Assurance**
+## **Testing & Quality Assurance**
 
 ### Test Infrastructure
 - Comprehensive test suite in `tests/test_simulation.py`
@@ -135,7 +135,7 @@ Cursor highlight color is stored by name in `SimConfig.cursor_color` and mapped 
 - Error handling with user-friendly messages
 - Performance monitoring and optimization
 
-## 🚀 **Entry Points & Usage**
+## **Entry Points & Usage**
 
 ### Package Usage
 ```python
@@ -164,7 +164,7 @@ python -m cargosim --windowed
 - All existing functionality preserved
 - Configuration files remain compatible
 
-## 🔄 **Development Workflow**
+## **Development Workflow**
 
 ### Modular Development
 - Each module has single, clear responsibility
@@ -178,6 +178,4 @@ python -m cargosim --windowed
 - Configuration validation prevents runtime errors
 - Performance monitoring and optimization
 
----
-
-*This project map reflects the current state of CargoSim as a professional, modular Python package with comprehensive features, testing, and documentation.*
+--- *This project map reflects the current state of CargoSim as a professional, modular Python package with comprehensive features, testing, and documentation.*

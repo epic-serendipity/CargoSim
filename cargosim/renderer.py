@@ -402,6 +402,8 @@ class Renderer(VizState):
             return AIRCRAFT_STATES['ENROUTE']
         elif ac_state == "AT_SPOKEB":
             return AIRCRAFT_STATES['UNLOADING']
+        elif ac_state == "RETURN_ENROUTE":
+            return AIRCRAFT_STATES['ENROUTE']
         else:
             return AIRCRAFT_STATES['IDLE_AT_HUB']
 
@@ -500,22 +502,12 @@ class Renderer(VizState):
                 else:
                     end_pos = start_pos
             else:
-                # Will return to hub or go to next spoke
-                if ac.location.startswith("S"):
-                    if ac.plan and len(ac.plan) > 1 and ac.plan[1] is not None:
-                        # Going to second spoke
-                        second_spoke = ac.plan[1]
-                        if 0 <= second_spoke < len(self.spoke_pos):
-                            end_pos = self.spoke_pos[second_spoke]
-                        else:
-                            end_pos = start_pos
-                    else:
-                        # Returning to hub
-                        end_pos = (self.cx, self.cy)
-                else:
-                    end_pos = start_pos
+                end_pos = start_pos
         else:
-            end_pos = start_pos
+            if ac.state == "RETURN_ENROUTE":
+                end_pos = (self.cx, self.cy)
+            else:
+                end_pos = start_pos
         
         return start_pos, end_pos
 
