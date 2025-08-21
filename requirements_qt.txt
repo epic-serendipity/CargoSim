@@ -1,0 +1,15 @@
+# Qt dependencies for CargoSim theme manager
+# Install with: pip install -r requirements_qt.txt
+
+# PyQt6 - Modern Qt bindings for Python (recommended)
+PyQt6>=6.4.0,<7.0.0
+
+# Alternative: PySide6 (Qt for Python) - LGPL licensed
+# PySide6>=6.4.0,<7.0.0
+
+# Note: Choose either PyQt6 OR PySide6, not both
+# PyQt6 is more feature-complete, PySide6 is LGPL licensed
+
+# Additional Qt dependencies for enhanced theming
+PyQt6-Qt6>=6.4.0,<7.0.0
+PyQt6-sip>=13.4.0,<14.0.0
