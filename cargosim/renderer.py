@@ -584,15 +584,20 @@ class Renderer(VizState):
         self.aircraft_positions[ac_name] = pos
         self.aircraft_headings[ac_name] = angle
 
-    def _initialize_spoke_bar_states(self):
-        """Initialize spoke bar states for all spokes."""
-        if not self.spoke_bar_states:
+    def _init_spoke_bar_states(self):
+        """Initialize spoke bar animation states."""
+        self.spoke_bar_states = []
+        if hasattr(self, 'sim') and self.sim:
             for i in range(len(self.sim.stock)):
+                # Use configurable denominators from simulation config
+                bar_scale = self.sim.cfg.bar_scale
+                display_caps = [bar_scale.denom_A, bar_scale.denom_B, bar_scale.denom_C, bar_scale.denom_D]
+                
                 bar_state = SpokeBarState(
                     current_heights=[0.0] * 4,
                     target_heights=[0.0] * 4,
                     last_update=time.time(),
-                    display_caps=SPOKE_BAR_DISPLAY_CAPS.copy(),
+                    display_caps=display_caps,
                     scaling_mode=self.bar_scaling_mode,
                     gamma=self.bar_gamma
                 )
@@ -603,36 +608,42 @@ class Renderer(VizState):
         if not self.spoke_bar_states:
             return
         
-        # Calculate rolling caps based on current stock values
-        for resource_idx in range(4):  # A, B, C, D
-            values = [self.sim.stock[s][resource_idx] if s < len(self.sim.stock) else 0 
-                     for s in range(len(self.sim.stock))]
+        # Use configurable denominators from simulation config instead of rolling caps
+        bar_scale = self.sim.cfg.bar_scale
+        new_caps = [bar_scale.denom_A, bar_scale.denom_B, bar_scale.denom_C, bar_scale.denom_D]
+        
+        # Update caps for all spokes
+        for bar_state in self.spoke_bar_states:
+            for resource_idx in range(4):
+                bar_state.display_caps[resource_idx] = max(1.0, new_caps[resource_idx])
+    
+    def refresh_bar_states(self):
+        """Refresh bar states when denominators change."""
+        if hasattr(self, 'sim') and self.sim and self.spoke_bar_states:
+            # Update display caps from current simulation config
+            bar_scale = self.sim.cfg.bar_scale
+            new_caps = [bar_scale.denom_A, bar_scale.denom_B, bar_scale.denom_C, bar_scale.denom_D]
             
-            if values:
-                # Use P75 as rolling cap
-                sorted_values = sorted(values)
-                p75_idx = int(len(sorted_values) * SPOKE_BAR_ROLLING_PERCENTILE)
-                rolling_cap = sorted_values[p75_idx] if p75_idx < len(sorted_values) else max(values)
-                
-                # Update caps for all spokes
-                for bar_state in self.spoke_bar_states:
-                    bar_state.display_caps[resource_idx] = max(1.0, rolling_cap)
+            for bar_state in self.spoke_bar_states:
+                for resource_idx in range(4):
+                    bar_state.display_caps[resource_idx] = max(1.0, new_caps[resource_idx])
 
     def _calculate_bar_height(self, value: float, cap: float, mode: str, gamma: float) -> float:
         """Calculate bar height based on scaling mode."""
         if value <= 0:
             return MIN_VISIBLE_BAR_HEIGHT
         
-        normalized = min(1.0, value / cap)
+        # Remove the ratio cap - use true ratio bounded only by pixel constraints
+        ratio = value / cap
         
         if mode == BAR_GEOMETRIC_MODE:
             # Apply geometric scaling
-            scaled = normalized ** gamma
+            scaled = ratio ** gamma
         else:
             # Linear scaling
-            scaled = normalized
+            scaled = ratio
         
-        # Apply minimum height and maximum height constraints
+        # Apply minimum height and maximum height constraints (pixel boundaries only)
         height = max(MIN_VISIBLE_BAR_HEIGHT, 
                     min(SPOKE_BAR_MAX_HEIGHT, scaled * SPOKE_BAR_MAX_HEIGHT))
         
@@ -910,8 +921,12 @@ class Renderer(VizState):
         # Initialize spoke positions
         self.spoke_pos = compute_spoke_positions(self.radius, self.cx, self.cy, M)
         
+        # Update simulation targeting positions if smart targeting is enabled
+        if hasattr(self.sim, 'update_targeting_positions'):
+            self.sim.update_targeting_positions((self.cx, self.cy), self.spoke_pos)
+        
         # Initialize enhanced systems
-        self._initialize_spoke_bar_states()
+        self._init_spoke_bar_states()
         
         # Initialize aircraft positions and states
         for ac in self.sim.fleet:
@@ -1094,6 +1109,14 @@ class Renderer(VizState):
             mode_text = self.font_small.render(bar_mode_text, True, (200, 200, 200))
             surf.blit(mode_text, (x0 + DEBUG_OVERLAY_PADDING, y))
             y += DEBUG_OVERLAY_LINE_HEIGHT
+            
+            # Current bar scale denominators
+            if hasattr(self.sim, 'cfg') and hasattr(self.sim.cfg, 'bar_scale'):
+                bar_scale = self.sim.cfg.bar_scale
+                denom_text = f"Bar denominators: A={bar_scale.denom_A}, B={bar_scale.denom_B}, C={bar_scale.denom_C}, D={bar_scale.denom_D}"
+                denom_surf = self.font_small.render(denom_text, True, (200, 200, 200))
+                surf.blit(denom_surf, (x0 + DEBUG_OVERLAY_PADDING, y))
+                y += DEBUG_OVERLAY_LINE_HEIGHT
         
         # Draw recent debug messages
         if self.debug_lines:

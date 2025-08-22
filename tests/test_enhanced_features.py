@@ -94,14 +94,12 @@ def test_enhanced_features():
             print("Failed to enable animation")
         
         print("\nAll tests completed successfully!")
-        return True
         
     except Exception as e:
         print(f"Test failed with error: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        raise  # Re-raise the exception to fail the test properly
 
 if __name__ == "__main__":
-    success = test_enhanced_features()
-    sys.exit(0 if success else 1)
+    test_enhanced_features()

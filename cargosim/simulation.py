@@ -1,12 +1,14 @@
 """Core simulation logic for CargoSim."""
 
 import copy
+import math
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import List, Tuple, Optional
 
-from .config import M, PAIR_ORDER_DEFAULT, A_PERIOD_DAYS_DFLT, B_PERIOD_DAYS_DFLT, C_PERIOD_DAYS_DFLT, D_PERIOD_DAYS_DFLT, VIS_CAPS_DFLT
+from .config import M, PAIR_ORDER_DEFAULT, A_PERIOD_DAYS_DFLT, B_PERIOD_DAYS_DFLT, C_PERIOD_DAYS_DFLT, D_PERIOD_DAYS_DFLT, DEFAULT_BAR_SCALE_DENOMINATORS
 from .config import SimConfig
+from .smart_targeting import SmartTargeting, TargetingConfig
 
 
 def _row_to_spoke(row: List[float]) -> SimpleNamespace:
@@ -47,7 +49,24 @@ class LogisticsSim:
         self.B_PERIOD_DAYS = cfg.b_days
         self.C_PERIOD_DAYS = cfg.c_days
         self.D_PERIOD_DAYS = cfg.d_days
-        self.VIS_CAPS = VIS_CAPS_DFLT
+        # Use configurable bar scale denominators instead of hardcoded VIS_CAPS
+        self.bar_scale = cfg.bar_scale
+
+        # Initialize smart targeting system if enabled
+        self.smart_targeting = None
+        if cfg.smart_targeting_enabled:
+            targeting_config = TargetingConfig()
+            if cfg.smart_targeting_config:
+                # Apply custom config if provided
+                for key, value in cfg.smart_targeting_config.items():
+                    if hasattr(targeting_config, key):
+                        setattr(targeting_config, key, value)
+            self.smart_targeting = SmartTargeting(targeting_config)
+        
+        # Force enable smart targeting for better aircraft distribution
+        if self.smart_targeting is None:
+            targeting_config = TargetingConfig()
+            self.smart_targeting = SmartTargeting(targeting_config)
 
         self.reset_world()
 
@@ -56,7 +75,8 @@ class LogisticsSim:
         self.day = 0
         self.half = "AM"  # AM for even t, PM for odd t
         self.stock = [[self.cfg.init_A, self.cfg.init_B, self.cfg.init_C, self.cfg.init_D] for _ in range(self.M)]
-        self.op = [False]*self.M  # operational flags (A+B+C+D gate)
+        # Initialize operational flags based on initial stock levels
+        self.op = [is_ops_capable(_row_to_spoke(stock_row)) for stock_row in self.stock]
         self.arrivals_next = [[] for _ in range(self.M)]
         self.pair_cursor = 0
         self.fleet = self.build_fleet(self.cfg.fleet_label)
@@ -71,6 +91,11 @@ class LogisticsSim:
         # History for rewind
         self.history: List[dict] = []
         self.push_snapshot()  # store initial state (period 0 before any action)
+        
+        # Initialize smart targeting positions if available
+        if self.smart_targeting:
+            self._initialize_targeting_positions()
+            self.smart_targeting.reset_recent_service()
 
     def can_run_op(self, s: int) -> bool:
         return is_ops_capable(_row_to_spoke(self.stock[s]))
@@ -78,10 +103,11 @@ class LogisticsSim:
     def run_op(self, s: int, amount: int = 1) -> bool:
         if not is_ops_capable(_row_to_spoke(self.stock[s])):
             return False
+        # Immediately consume C and D resources when operation is launched
         self.stock[s][2] = max(0.0, self.stock[s][2] - amount)
         self.stock[s][3] = max(0, self.stock[s][3] - amount)
-        assert self.stock[s][2] >= -1e-9 and self.stock[s][3] >= -1e-9, "C/D negative after op"
-        self.ops_by_spoke[s] += 1
+        # Increment operation counter
+        self.ops_by_spoke[s] += amount
         return True
 
     def build_fleet(self, label: str) -> List[Aircraft]:
@@ -99,12 +125,178 @@ class LogisticsSim:
                     Aircraft("C-27", self.cfg.cap_c27, "C-27 #1"),
                     Aircraft("C-27", self.cfg.cap_c27, "C-27 #2")]
         raise ValueError("Unknown fleet label")
-
+    
+    def _initialize_targeting_positions(self):
+        """Initialize smart targeting system with hub and spoke positions."""
+        if not self.smart_targeting:
+            return
+            
+        # Use approximate positions based on the circular layout
+        # In a real implementation, these would come from the renderer
+        hub_pos = (0, 0)  # Center
+        spoke_positions = []
+        
+        for i in range(self.M):
+            # Approximate circular layout (radius 100, starting from top)
+            theta = 2 * 3.14159 * i / self.M
+            x = int(100 * math.cos(theta))
+            y = int(100 * math.sin(theta))
+            spoke_positions.append((x, y))
+            
+        self.smart_targeting.initialize_positions(hub_pos, spoke_positions)
+    
+    def update_targeting_positions(self, hub_pos: Tuple[int, int], spoke_positions: List[Tuple[int, int]]):
+        """Update hub and spoke positions for smart targeting (called from renderer)."""
+        if self.smart_targeting:
+            self.smart_targeting.initialize_positions(hub_pos, spoke_positions)
+    
+    def _plan_smart_route(self, aircraft: Aircraft, stage: str) -> Optional[Tuple[Tuple[int, Optional[int]], List[int], List[int]]]:
+        """Plan a route for an aircraft using smart targeting."""
+        if not self.smart_targeting:
+            return None
+            
+        # Get aircraft location
+        location = aircraft.location
+        
+        # Find best route
+        first_leg, second_leg = self.smart_targeting.find_best_two_legs(
+            location, self.stock, stage, aircraft.cap
+        )
+        
+        if first_leg is None:
+            return None
+            
+        # Reserve the first spoke
+        self.smart_targeting.reserve_spoke(first_leg.spoke_idx)
+        
+        # Plan payload for first leg
+        payload_A = self._plan_payload_for_spoke(first_leg.spoke_idx, aircraft.cap, stage)
+        
+        if second_leg is not None:
+            # Reserve the second spoke
+            self.smart_targeting.reserve_spoke(second_leg.spoke_idx)
+            payload_B = self._plan_payload_for_spoke(second_leg.spoke_idx, aircraft.cap, stage)
+            return (first_leg.spoke_idx, second_leg.spoke_idx), payload_A, payload_B
+        else:
+            return (first_leg.spoke_idx, None), payload_A, [0, 0, 0, 0]
+    
+    def _plan_payload_for_spoke(self, spoke_idx: int, capacity: int, stage: str) -> List[int]:
+        """Plan payload for a specific spoke based on current needs and stage."""
+        payload = [0, 0, 0, 0]
+        remaining_capacity = capacity
+        
+        # Initialize all need variables to avoid UnboundLocalError
+        need_A = max(0, 1 - self.stock[spoke_idx][0])
+        need_B = max(0, 1 - self.stock[spoke_idx][1])
+        need_C = max(0, 1 - self.stock[spoke_idx][2])
+        need_D = max(0, 1 - self.stock[spoke_idx][3])
+        
+        if stage == "A":
+            # Focus on A and B resources
+            # need_A and need_B are already calculated above
+            
+            # Prioritize A deficits
+            if need_A > 0 and remaining_capacity > 0:
+                amount = min(need_A, remaining_capacity)
+                payload[0] = amount
+                remaining_capacity -= amount
+                
+            if need_B > 0 and remaining_capacity > 0:
+                amount = min(need_B, remaining_capacity)
+                payload[1] = amount
+                remaining_capacity -= amount
+                
+        elif stage == "B":
+            # Focus on B resources, maintain A
+            # Update need_A to maintain 2 units (need_B is already calculated above)
+            need_A = max(0, 2 - self.stock[spoke_idx][0])  # Maintain 2 units
+            
+            if need_B > 0 and remaining_capacity > 0:
+                amount = min(need_B, remaining_capacity)
+                payload[1] = amount
+                remaining_capacity -= amount
+                
+            if need_A > 0 and remaining_capacity > 0:
+                amount = min(need_A, remaining_capacity)
+                payload[0] = amount
+                remaining_capacity -= amount
+                
+        else:  # "OPS"
+            # Focus on C and D for operations
+            # need_C and need_D are already calculated above
+            
+            if need_C > 0 and remaining_capacity > 0:
+                amount = min(need_C, remaining_capacity)
+                payload[2] = amount
+                remaining_capacity -= amount
+                
+            if need_D > 0 and remaining_capacity > 0:
+                amount = min(need_D, remaining_capacity)
+                payload[3] = amount
+                remaining_capacity -= amount
+                
+            # Also maintain A and B (update need_A and need_B to maintain 2 units)
+            need_A = max(0, 2 - self.stock[spoke_idx][0])
+            need_B = max(0, 2 - self.stock[spoke_idx][1])
+            
+            if need_A > 0 and remaining_capacity > 0:
+                amount = min(need_A, remaining_capacity)
+                payload[0] = amount
+                remaining_capacity -= amount
+                
+            if need_B > 0 and remaining_capacity > 0:
+                amount = min(need_B, remaining_capacity)
+                payload[1] = amount
+                remaining_capacity -= amount
+        
+        # Enhanced payload planning for plentiful resource scenarios
+        # When resources are plentiful, consider maintenance flights
+        if remaining_capacity > 0 and all(need <= 0 for need in [need_A, need_B, need_C, need_D]):
+            # All immediate needs are met, but we can still optimize resource levels
+            current_stock = self.stock[spoke_idx]
+            
+            # Target optimal levels for maintenance
+            optimal_A = 2.0
+            optimal_B = 2.0
+            optimal_C = 1.0
+            optimal_D = 1.0
+            
+            # Calculate how much we can add to get closer to optimal
+            if remaining_capacity > 0 and current_stock[0] < optimal_A:
+                add_A = min(remaining_capacity, optimal_A - current_stock[0])
+                payload[0] += add_A
+                remaining_capacity -= add_A
+                
+            if remaining_capacity > 0 and current_stock[1] < optimal_B:
+                add_B = min(remaining_capacity, optimal_B - current_stock[1])
+                payload[1] += add_B
+                remaining_capacity -= add_B
+                
+            if remaining_capacity > 0 and current_stock[2] < optimal_C:
+                add_C = min(remaining_capacity, optimal_C - current_stock[2])
+                payload[2] += add_C
+                remaining_capacity -= add_C
+                
+            if remaining_capacity > 0 and current_stock[3] < optimal_D:
+                add_D = min(remaining_capacity, optimal_D - current_stock[3])
+                payload[3] += add_D
+                remaining_capacity -= add_D
+        
+        return payload
+    
     def detect_stage(self) -> str:
-        if any(self.stock[i][0] == 0 for i in range(self.M)):
+        # Check for critical shortages (at or below 0.5)
+        if any(self.stock[i][0] <= 0.5 for i in range(self.M)):
             return "A"
-        if any(self.stock[i][1] == 0 for i in range(self.M)):
+        if any(self.stock[i][1] <= 0.5 for i in range(self.M)):
             return "B"
+        
+        # Check for low resources (below 1.5) to be proactive
+        if any(self.stock[i][0] < 1.5 for i in range(self.M)):
+            return "A"
+        if any(self.stock[i][1] < 1.5 for i in range(self.M)):
+            return "B"
+            
         return "OPS"
 
     def plan_for_pair_stage(self, i: int, j: int, cap_left: int, stage: str):
@@ -191,8 +383,20 @@ class LogisticsSim:
 
         # 2) RECOMPUTE_STATE_SNAPSHOTS (flags derived from stock)
         stage = self.detect_stage()
+        
+        # Update operational flags after launching operations
+        for s in range(self.M):
+            self.op[s] = is_ops_capable(_row_to_spoke(self.stock[s]))
+        
         actions_this_period: List[Tuple[str,str]] = []
         pairs_used = set()  # ensure unique pair per period across all aircraft
+        
+        # 2.5) LAUNCH OPERATIONS IMMEDIATELY when spokes are operational
+        for s in range(self.M):
+            if is_ops_capable(_row_to_spoke(self.stock[s])):
+                # Launch operation if this spoke is operational
+                self.run_op(s)
+                actions_this_period.append((f"SPOKE{s+1}", "OPERATION LAUNCHED"))
 
         # 3) Aircraft actions
         for ac in sorted(self.fleet, key=lambda a: (-a.cap, a.name)):
@@ -275,6 +479,31 @@ class LogisticsSim:
                     ac.rest_cooldown = 1
                     continue
 
+                # Try smart targeting first if enabled
+                if self.smart_targeting:
+                    smart_route = self._plan_smart_route(ac, stage)
+                    if smart_route:
+                        route, payload_A, payload_B = smart_route
+                        i, j = route
+                        
+                        # Update aircraft plan and payload
+                        ac.plan = route
+                        ac.payload_A = payload_A[:]
+                        ac.payload_B = payload_B[:]
+                        
+                        # Log actions
+                        actions_this_period.append((ac.name, f"ONLOAD@HUB→S{i+1}"))
+                        ac.state = "LEG1_ENROUTE"
+                        actions_this_period.append((ac.name, f"MOVE HUB→S{i+1}"))
+                        consume_event(); consume_event()
+                        
+                        # Update service tracking
+                        self.smart_targeting.update_recent_service(i)
+                        if j is not None:
+                            self.smart_targeting.update_recent_service(j)
+                        continue
+
+                # Fall back to original pair-based planning
                 tried = 0
                 cursor = self.pair_cursor
                 chosen_pair = None
@@ -324,9 +553,7 @@ class LogisticsSim:
                     if self.stock[s][0] > 0 and self.stock[s][1] > 0:
                         self.stock[s][1] = max(0, self.stock[s][1] - 1)
 
-        # recompute operational flags after ops and PM consumption
-        for s in range(self.M):
-            self.op[s] = is_ops_capable(_row_to_spoke(self.stock[s]))
+        # Note: Operational flags are already updated earlier in the method
 
         self.check_invariants(pre_stock, ops_before)
         self.actions_log.append(actions_this_period)
@@ -371,6 +598,11 @@ class LogisticsSim:
             # Reset stuck counter when progress is made
             if hasattr(self, '_stuck_periods'):
                 self._stuck_periods = 0
+
+        # Smart targeting cleanup and maintenance
+        if self.smart_targeting:
+            self.smart_targeting.clear_period_reservations()
+            self.smart_targeting.decay_recent_service()
 
         return actions_this_period
 

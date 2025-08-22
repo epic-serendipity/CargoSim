@@ -8,7 +8,7 @@ from typing import List, Tuple, Optional, Dict, Literal, NamedTuple
 
 # Configuration constants
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cargo_sim_config.json")
-CONFIG_VERSION = 7
+CONFIG_VERSION = 8
 
 # Default consumption cadences (PM only; day = t//2)
 A_PERIOD_DAYS_DFLT = 2  # A: 1 every 2 days
@@ -30,6 +30,9 @@ VIS_CAPS_DFLT = (6, 2, 4, 4)  # used for relative bar heights
 # Number of spokes
 M = 10
 PAIR_ORDER_DEFAULT = [(0,1),(2,3),(4,5),(6,7),(8,9)]  # zero-based spoke indices
+
+# Default bar scale denominators for user-editable scaling
+DEFAULT_BAR_SCALE_DENOMINATORS = (2, 2, 2, 2)  # A, B, C, D
 
 
 def _hex(h):  # helper to clamp/normalize hex
@@ -1956,6 +1959,32 @@ class GameplayConfig:
 
 
 @dataclass
+class BarScale:
+    """Configuration for user-editable bar scale denominators."""
+    denom_A: int = 2
+    denom_B: int = 2
+    denom_C: int = 2
+    denom_D: int = 2
+    
+    def to_json(self) -> dict:
+        return {
+            "denom_A": self.denom_A,
+            "denom_B": self.denom_B,
+            "denom_C": self.denom_C,
+            "denom_D": self.denom_D,
+        }
+    
+    @staticmethod
+    def from_json(d: dict) -> "BarScale":
+        scale = BarScale()
+        scale.denom_A = int(d.get("denom_A", scale.denom_A))
+        scale.denom_B = int(d.get("denom_B", scale.denom_B))
+        scale.denom_C = int(d.get("denom_C", scale.denom_C))
+        scale.denom_D = int(d.get("denom_D", scale.denom_D))
+        return scale
+
+
+@dataclass
 class SimConfig:
     config_version: int = CONFIG_VERSION
     fleet_label: str = "2xC130"       # "2xC130", "4xC130", "2xC130_2xC27"
@@ -1995,6 +2024,13 @@ class SimConfig:
     adm: AdvancedDecisionConfig = field(default_factory=AdvancedDecisionConfig)
     gameplay: GameplayConfig = field(default_factory=GameplayConfig)
     launch_fullscreen: bool = True
+    
+    # Smart targeting system configuration
+    smart_targeting_enabled: bool = True
+    smart_targeting_config: Optional[Dict[str, any]] = None
+    
+    # Bar scale configuration for user-editable denominators
+    bar_scale: BarScale = field(default_factory=BarScale)
 
     def to_json(self) -> dict:
         return {
@@ -2024,6 +2060,9 @@ class SimConfig:
             "fps": self.fps,
             "seed": self.seed,
             "launch_fullscreen": self.launch_fullscreen,
+            "smart_targeting_enabled": self.smart_targeting_enabled,
+            "smart_targeting_config": self.smart_targeting_config,
+            "bar_scale": self.bar_scale.to_json(),
             "theme": self.theme.to_json(),
             "recording": self.recording.to_json(),
             "adm": self.adm.to_json(),
@@ -2066,6 +2105,21 @@ class SimConfig:
         cfg.viz_right_panel_mode = d.get("viz_right_panel_mode", cfg.viz_right_panel_mode)
         cfg.fps = int(d.get("fps", cfg.fps))
         cfg.seed = int(d.get("seed", cfg.seed))
+        cfg.smart_targeting_enabled = bool(d.get("smart_targeting_enabled", cfg.smart_targeting_enabled))
+        cfg.smart_targeting_config = d.get("smart_targeting_config", cfg.smart_targeting_config)
+        
+        # Load bar scale configuration with backward compatibility
+        if "bar_scale" in d:
+            cfg.bar_scale = BarScale.from_json(d["bar_scale"])
+        else:
+            # Backward compatibility: use old VIS_CAPS_DFLT if available
+            old_caps = d.get("vis_caps", DEFAULT_BAR_SCALE_DENOMINATORS)
+            if isinstance(old_caps, list) and len(old_caps) == 4:
+                cfg.bar_scale.denom_A = max(1, int(old_caps[0]))
+                cfg.bar_scale.denom_B = max(1, int(old_caps[1]))
+                cfg.bar_scale.denom_C = max(1, int(old_caps[2]))
+                cfg.bar_scale.denom_D = max(1, int(old_caps[3]))
+        
         cfg.theme = ThemeConfig.from_json(d.get("theme", {}))
         cfg.recording = RecordingConfig.from_json(d.get("recording", {}))
         cfg.adm = AdvancedDecisionConfig.from_json(d.get("adm", {}))

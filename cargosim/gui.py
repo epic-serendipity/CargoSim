@@ -58,8 +58,8 @@ class ControlGUI:
             
             log_runtime_event("Setting up root window properties")
             root.title("CargoSim — Control Panel")
-            root.geometry("860x760")
-            root.minsize(760, 640)
+            root.geometry("800x650")
+            root.minsize(750, 600)
 
             log_runtime_event("Setting up GUI styles")
             self._setup_style()
@@ -339,28 +339,29 @@ class ControlGUI:
         self.unlimited_var = tk.BooleanVar(value=self.cfg.unlimited_storage)
         ttk.Checkbutton(stocks_frame, text="Unlimited Storage", variable=self.unlimited_var).grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 0))
         
-        # Consumption Cadence Section
+        # Consumption Cadence Section - Compact 2x2 grid layout
         cadence_frame = ttk.LabelFrame(left_frame, text="Consumption Cadence", padding=12)
         cadence_frame.grid(row=2, column=0, sticky="ew")
         cadence_frame.grid_columnconfigure(1, weight=1)
+        cadence_frame.grid_columnconfigure(3, weight=1)
         
-        # Cadence inputs in grid layout
+        # Cadence inputs in compact 2x2 grid layout
         self.a_days = tk.IntVar(value=self.cfg.a_days)
-        ttk.Label(cadence_frame, text="A cadence (days/unit):", style="Header.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
-        ttk.Spinbox(cadence_frame, from_=1, to=30, textvariable=self.a_days, width=12).grid(row=0, column=1, sticky="w", padx=(12, 0))
+        ttk.Label(cadence_frame, text="A (days/unit):", style="Header.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        ttk.Spinbox(cadence_frame, from_=1, to=30, textvariable=self.a_days, width=8).grid(row=0, column=1, sticky="w", padx=(8, 0))
         
         self.b_days = tk.IntVar(value=self.cfg.b_days)
-        ttk.Label(cadence_frame, text="B cadence (days/unit):", style="Header.TLabel").grid(row=1, column=0, sticky="w", pady=(0, 8))
-        ttk.Spinbox(cadence_frame, from_=1, to=30, textvariable=self.b_days, width=12).grid(row=1, column=1, sticky="w", padx=(12, 0))
+        ttk.Label(cadence_frame, text="B (days/unit):", style="Header.TLabel").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=(0, 4))
+        ttk.Spinbox(cadence_frame, from_=1, to=30, textvariable=self.b_days, width=8).grid(row=0, column=3, sticky="w", padx=(8, 0))
         
         # Add missing C and D cadence elements
         self.c_days = tk.IntVar(value=getattr(self.cfg, 'c_days', 2))  # Default to 2 if not in config
-        ttk.Label(cadence_frame, text="C cadence (days/unit):", style="Header.TLabel").grid(row=2, column=0, sticky="w", pady=(0, 8))
-        ttk.Spinbox(cadence_frame, from_=1, to=30, textvariable=self.c_days, width=12).grid(row=2, column=1, sticky="w", padx=(12, 0))
+        ttk.Label(cadence_frame, text="C (ops/unit):", style="Header.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Spinbox(cadence_frame, from_=1, to=30, textvariable=self.c_days, width=8).grid(row=1, column=1, sticky="w", padx=(8, 0))
         
         self.d_days = tk.IntVar(value=getattr(self.cfg, 'd_days', 2))  # Default to 2 if not in config
-        ttk.Label(cadence_frame, text="D cadence (days/unit):", style="Header.TLabel").grid(row=3, column=0, sticky="w", pady=(0, 8))
-        ttk.Spinbox(cadence_frame, from_=1, to=30, textvariable=self.d_days, width=12).grid(row=3, column=1, sticky="w", padx=(12, 0))
+        ttk.Label(cadence_frame, text="D (ops/unit):", style="Header.TLabel").grid(row=1, column=2, sticky="w", padx=(16, 0), pady=(4, 0))
+        ttk.Spinbox(cadence_frame, from_=1, to=30, textvariable=self.d_days, width=8).grid(row=1, column=3, sticky="w", padx=(8, 0))
 
         # Right side - Quick Reference (Column 1)
         right_frame = ttk.Frame(tab, style="Card.TFrame")
@@ -473,12 +474,22 @@ class ControlGUI:
 
     def build_visual_tab(self, tab):
         """Build the enhanced visualization tab with improved styling."""
-        g = ttk.Frame(tab, style="Card.TFrame")
-        g.pack(fill="both", expand=True)
+        # Configure main tab for two-column layout
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(1, weight=1)
+        tab.grid_rowconfigure(0, weight=1)
+        
+        # Left column
+        left_frame = ttk.Frame(tab, style="Card.TFrame")
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=8)
+        
+        # Right column  
+        right_frame = ttk.Frame(tab, style="Card.TFrame")
+        right_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=8)
 
-        # Visual settings
-        vis_frame = ttk.LabelFrame(g, text="Visual Settings", padding=12)
-        vis_frame.pack(fill="x", pady=(0, 16))
+        # LEFT COLUMN: Visual settings
+        vis_frame = ttk.LabelFrame(left_frame, text="Visual Settings", padding=12)
+        vis_frame.pack(fill="x", pady=(0, 12))
         
         # Side panels setting
         side_panels_row = ttk.Frame(vis_frame)
@@ -515,9 +526,87 @@ class ControlGUI:
         ttk.Checkbutton(header_row, text="Show simulation header", 
                        variable=self.show_header_var).pack(side="left")
 
-        # Right panel view
-        panel_frame = ttk.LabelFrame(g, text="Right Panel View", padding=12)
-        panel_frame.pack(fill="x", pady=(0, 16))
+        # Bar Scale (Denominators) group - LEFT COLUMN
+        bar_scale_frame = ttk.LabelFrame(left_frame, text="Bar Scale (Denominators)", padding=12)
+        bar_scale_frame.pack(fill="x", pady=(0, 12))
+        
+        # Create a tooltip helper for the bar scale controls
+        def create_bar_scale_tooltip(widget, resource_name):
+            _Tooltip(widget, f"Each {resource_name} bar shows current_value / denominator", self.cfg.theme)
+        
+        # A, B, C, D denominator controls in a compact grid
+        denom_vars = []
+        error_labels = []
+        resource_names = ["A", "B", "C", "D"]
+        
+        # Create a grid for compact layout
+        grid_frame = ttk.Frame(bar_scale_frame)
+        grid_frame.pack(fill="x", pady=(4, 0))
+        
+        for i, (resource, name) in enumerate(zip([self.cfg.bar_scale.denom_A, self.cfg.bar_scale.denom_B, 
+                                                  self.cfg.bar_scale.denom_C, self.cfg.bar_scale.denom_D], resource_names)):
+            denom_var = tk.IntVar(value=resource)
+            denom_vars.append(denom_var)
+            
+            # Place in 2x2 grid: A,B on top row, C,D on bottom row
+            row = i // 2
+            col = i % 2
+            
+            # Container for each denominator control
+            control_frame = ttk.Frame(grid_frame)
+            control_frame.grid(row=row, column=col, sticky="w", padx=(0, 20), pady=2)
+            
+            ttk.Label(control_frame, text=f"{name}:", style="Header.TLabel", width=2).pack(side="left")
+            
+            # Spinbox for denominator input with validation
+            def validate_denominator(value, var=denom_var):
+                try:
+                    if value == "":
+                        return True
+                    val = int(value)
+                    return val >= 1 and val <= 99
+                except ValueError:
+                    return False
+            
+            vcmd = (self.root.register(validate_denominator), '%P')
+            denom_entry = ttk.Spinbox(control_frame, from_=1, to=99, width=6, textvariable=denom_var, 
+                                     validate="key", validatecommand=vcmd, command=lambda: self._on_bar_scale_changed())
+            denom_entry.pack(side="left", padx=(4, 0))
+            
+            # Add tooltip
+            create_bar_scale_tooltip(denom_entry, name)
+            
+            # Error label for validation feedback (smaller)
+            error_label = ttk.Label(control_frame, text="", foreground="red", style="Muted.TLabel", font=("TkDefaultFont", 7))
+            error_label.pack(side="left", padx=(4, 0))
+            error_labels.append(error_label)
+        
+        # Store denominator variables and error labels for later access
+        self.bar_scale_vars = denom_vars
+        self.bar_scale_error_labels = error_labels
+        
+        # Button row for bar scale actions
+        button_row = ttk.Frame(bar_scale_frame)
+        button_row.pack(fill="x", pady=(12, 0))
+        
+        # Reset to Defaults button
+        reset_btn = ttk.Button(button_row, text="Reset to Defaults", 
+                              command=self._reset_bar_scale_defaults, style="Secondary.TButton")
+        reset_btn.pack(side="left", padx=(0, 8))
+        
+        # Apply to All Sessions (Save) button
+        save_btn = ttk.Button(button_row, text="Apply to All Sessions (Save)", 
+                             command=self._save_bar_scale_config, style="Primary.TButton")
+        save_btn.pack(side="left")
+        
+        # Help text for bar scale
+        help_text = ttk.Label(bar_scale_frame, text="Each bar shows current_value / denominator. Bars are bounded only by their pixel containers.", 
+                             style="Muted.TLabel", wraplength=400)
+        help_text.pack(anchor="w", pady=(8, 0))
+
+        # RIGHT COLUMN: Right panel view
+        panel_frame = ttk.LabelFrame(right_frame, text="Right Panel View", padding=12)
+        panel_frame.pack(fill="x", pady=(0, 12))
         
         panel_row = ttk.Frame(panel_frame)
         panel_row.pack(fill="x")
@@ -528,9 +617,9 @@ class ControlGUI:
                                    "ops_total_sparkline", "ops_total_number", "ops_by_spoke")
         panel_menu.pack(side="left", padx=(12, 0), fill="x", expand=True)
 
-        # Cursor color
-        cursor_frame = ttk.LabelFrame(g, text="Cursor Color", padding=12)
-        cursor_frame.pack(fill="x")
+        # RIGHT COLUMN: Cursor color
+        cursor_frame = ttk.LabelFrame(right_frame, text="Cursor Color", padding=12)
+        cursor_frame.pack(fill="x", pady=(0, 12))
         
         cursor_row = ttk.Frame(cursor_frame)
         cursor_row.pack(fill="x")
@@ -540,30 +629,36 @@ class ControlGUI:
                                     *list(CURSOR_COLORS.keys()))
         cursor_menu.pack(side="left", padx=(12, 0), fill="x", expand=True)
         
-        # Help section
-        help_frame = ttk.Frame(g, style="Card.TFrame")
-        help_frame.pack(fill="x", pady=(16, 0))
+        # RIGHT COLUMN: Help section
+        help_frame = ttk.Frame(right_frame, style="Card.TFrame")
+        help_frame.pack(fill="x", pady=(12, 0))
         
         ttk.Label(help_frame, text="Visualization Help", style="Header.TLabel").pack(anchor="w", pady=(0, 8))
         ttk.Separator(help_frame).pack(fill="x", pady=(0, 8))
         
         help_text = [
             "• Side Panels: Show operational data during simulation",
-            "• Statistics Overlay: Display real-time performance metrics",
+            "• Statistics Overlay: Display real-time performance metrics", 
             "• Aircraft Orientation: Rotate aircraft to show flight direction",
             "• Aircraft Labels: Show identification tags on aircraft",
             "• Header: Display simulation status and operational summary",
+            "• Bar Scale: Control how resource bars are scaled (current_value / denominator)",
             "• Right Panel: Choose what operational data to display",
             "• Cursor Color: Select highlight color for better visibility"
         ]
         
         for help_line in help_text:
-            ttk.Label(help_frame, text=help_line, style="Muted.TLabel").pack(anchor="w", pady=2)
+            ttk.Label(help_frame, text=help_line, style="Muted.TLabel").pack(anchor="w", pady=1)
 
     def build_theme_tab(self, tab):
         """Build the enhanced theme tab with auto-applying themes."""
+        # Configure main tab for single column layout
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(0, weight=1)
+        
+        # Main container
         g = ttk.Frame(tab, style="Card.TFrame")
-        g.pack(fill="both", expand=True)
+        g.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
 
         # Theme preset selection with descriptions
         theme_frame = ttk.LabelFrame(g, text="Theme Preset", padding=12)
@@ -612,19 +707,24 @@ class ControlGUI:
             ("Info", "info")
         ]
         
+        # Organize color swatches in 2 rows of 3
         for i, (label, attr) in enumerate(colors_to_show):
+            if i == 3:  # Start new row after 3 items
+                swatch_frame = ttk.Frame(palette_frame)
+                swatch_frame.pack(fill="x", pady=(4, 0))
+            
             swatch_container = ttk.Frame(swatch_frame)
-            swatch_container.pack(side="left", padx=(0, 16))
+            swatch_container.pack(side="left", padx=(0, 12))
             
-            ttk.Label(swatch_container, text=label, style="Muted.TLabel").pack()
+            ttk.Label(swatch_container, text=label, style="Muted.TLabel", font=("TkDefaultFont", 8)).pack()
             
-            # Create color swatch (colored frame)
-            swatch = tk.Frame(swatch_container, width=40, height=20, relief="solid", borderwidth=1)
-            swatch.pack(pady=(4, 0))
+            # Create color swatch (colored frame) - smaller
+            swatch = tk.Frame(swatch_container, width=30, height=15, relief="solid", borderwidth=1)
+            swatch.pack(pady=(2, 0))
             self.color_swatches[attr] = swatch
             
-            # Color value label
-            color_label = ttk.Label(swatch_container, text="", style="Muted.TLabel", font=("TkDefaultFont", 7))
+            # Color value label - smaller font
+            color_label = ttk.Label(swatch_container, text="", style="Muted.TLabel", font=("TkDefaultFont", 6))
             color_label.pack()
             self.color_swatches[f"{attr}_label"] = color_label
         
@@ -1167,6 +1267,77 @@ class ControlGUI:
     def _setup_global_widget_options(self):
         """No-op - theming is handled centrally by ui_theme.py."""
         pass
+
+    def _reset_bar_scale_defaults(self):
+        """Reset bar scale denominators to their default values."""
+        from .config import DEFAULT_BAR_SCALE_DENOMINATORS
+        for i, var in enumerate(self.bar_scale_vars):
+            var.set(DEFAULT_BAR_SCALE_DENOMINATORS[i])
+        self._on_bar_scale_changed()
+        messagebox.showinfo("Bar Scale Reset", "Bar scale denominators have been reset to their default values.")
+
+    def _save_bar_scale_config(self):
+        """Save the current bar scale denominators to the config."""
+        try:
+            # Validate all values before saving
+            for i, var in enumerate(self.bar_scale_vars):
+                value = var.get()
+                if not (1 <= value <= 99):
+                    messagebox.showerror("Validation Error", f"Denominator {['A', 'B', 'C', 'D'][i]} must be between 1 and 99")
+                    return
+            
+            # Update config
+            self.cfg.bar_scale.denom_A = self.bar_scale_vars[0].get()
+            self.cfg.bar_scale.denom_B = self.bar_scale_vars[1].get()
+            self.cfg.bar_scale.denom_C = self.bar_scale_vars[2].get()
+            self.cfg.bar_scale.denom_D = self.bar_scale_vars[3].get()
+            
+            # Save to disk
+            from .config import save_config
+            save_config(self.cfg)
+            
+            messagebox.showinfo("Bar Scale Saved", "Bar scale denominators have been saved to the configuration and will persist across sessions.")
+        except Exception as e:
+            messagebox.showerror("Error Saving Bar Scale", f"Failed to save bar scale denominators: {e}")
+
+    def _on_bar_scale_changed(self):
+        """Handle bar scale changes and update error labels."""
+        for i, var in enumerate(self.bar_scale_vars):
+            try:
+                value = var.get()
+                if hasattr(self, 'bar_scale_error_labels') and i < len(self.bar_scale_error_labels):
+                    error_label = self.bar_scale_error_labels[i]
+                    if value < 1 or value > 99:
+                        error_label.configure(text="Must be between 1 and 99")
+                    else:
+                        error_label.configure(text="")
+            except (tk.TclError, ValueError):
+                # Handle invalid input gracefully
+                pass
+        
+        # Update simulation bar scale if available
+        self._update_simulation_bar_scale()
+    
+    def _update_simulation_bar_scale(self):
+        """Update the simulation's bar scale with current values."""
+        try:
+            # Check if we have access to the simulation
+            if hasattr(self, 'simulation') and self.simulation:
+                # Update the simulation's bar scale
+                self.simulation.cfg.bar_scale.denom_A = self.bar_scale_vars[0].get()
+                self.simulation.cfg.bar_scale.denom_B = self.bar_scale_vars[1].get()
+                self.simulation.cfg.bar_scale.denom_C = self.bar_scale_vars[2].get()
+                self.simulation.cfg.bar_scale.denom_D = self.bar_scale_vars[3].get()
+                
+                # Update the simulation's bar_scale attribute
+                self.simulation.bar_scale = self.simulation.cfg.bar_scale
+                
+                # Try to refresh the renderer if available
+                if hasattr(self, 'renderer') and self.renderer:
+                    self.renderer.refresh_bar_states()
+        except Exception as e:
+            # Silently handle errors - simulation might not be running yet
+            pass
 
 
 if __name__ == "__main__":
