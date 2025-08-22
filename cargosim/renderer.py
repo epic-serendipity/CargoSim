@@ -446,6 +446,14 @@ class Renderer(VizState):
                 self.aircraft_states[ac_name] = new_visual_state
                 self._initialize_aircraft_state(ac_name, ac, new_visual_state)
             
+            # Special handling for RETURN_ENROUTE: ensure movement segment exists
+            if ac.state == "RETURN_ENROUTE" and ac_name not in self.aircraft_segments:
+                # Force creation of return movement segment
+                start_pos, end_pos = self._get_aircraft_movement_positions(ac)
+                if start_pos and end_pos and start_pos != end_pos:
+                    segment = self._create_aircraft_segment(ac_name, start_pos, end_pos, self.current_frame)
+                    self.aircraft_segments[ac_name] = segment
+            
             # Update position and heading based on current segment
             if ac_name in self.aircraft_segments:
                 segment = self.aircraft_segments[ac_name]
@@ -460,10 +468,14 @@ class Renderer(VizState):
             # Aircraft is moving, create movement segment
             start_pos, end_pos = self._get_aircraft_movement_positions(ac)
             if start_pos and end_pos and start_pos != end_pos:
-                # Add random stagger delay (0-3 frames)
+                # Add random stagger delay (0-3 frames) for departures, not returns
                 if ac_name not in self.aircraft_stagger_delays:
                     import random
-                    self.aircraft_stagger_delays[ac_name] = random.randint(0, 3)
+                    # No delay for return flights to ensure smooth animation
+                    if ac.state == "RETURN_ENROUTE":
+                        self.aircraft_stagger_delays[ac_name] = 0
+                    else:
+                        self.aircraft_stagger_delays[ac_name] = random.randint(0, 3)
                 
                 segment = self._create_aircraft_segment(ac_name, start_pos, end_pos, self.current_frame)
                 self.aircraft_segments[ac_name] = segment
@@ -485,29 +497,27 @@ class Renderer(VizState):
         else:
             start_pos = (self.cx, self.cy)
         
-        # Determine destination based on plan
-        if ac.plan:
-            if ac.state == "LEG1_ENROUTE":
-                # Moving from HUB to first spoke
-                first_spoke = ac.plan[0]
-                if 0 <= first_spoke < len(self.spoke_pos):
-                    end_pos = self.spoke_pos[first_spoke]
-                else:
-                    end_pos = start_pos
-            elif ac.state == "AT_SPOKEB_ENROUTE":
-                # Moving between spokes
-                second_spoke = ac.plan[1]
-                if second_spoke is not None and 0 <= second_spoke < len(self.spoke_pos):
-                    end_pos = self.spoke_pos[second_spoke]
-                else:
-                    end_pos = start_pos
+        # Determine destination based on plan and state
+        if ac.state == "LEG1_ENROUTE" and ac.plan:
+            # Moving from HUB to first spoke
+            first_spoke = ac.plan[0]
+            if 0 <= first_spoke < len(self.spoke_pos):
+                end_pos = self.spoke_pos[first_spoke]
             else:
                 end_pos = start_pos
+        elif ac.state == "AT_SPOKEB_ENROUTE" and ac.plan:
+            # Moving between spokes
+            second_spoke = ac.plan[1]
+            if second_spoke is not None and 0 <= second_spoke < len(self.spoke_pos):
+                end_pos = self.spoke_pos[second_spoke]
+            else:
+                end_pos = start_pos
+        elif ac.state == "RETURN_ENROUTE":
+            # Moving from current spoke back to HUB
+            end_pos = (self.cx, self.cy)
         else:
-            if ac.state == "RETURN_ENROUTE":
-                end_pos = (self.cx, self.cy)
-            else:
-                end_pos = start_pos
+            # No movement - aircraft is stationary
+            end_pos = start_pos
         
         return start_pos, end_pos
 
@@ -1256,11 +1266,25 @@ class Renderer(VizState):
                              not self.simulation_completed and 
                              (current_time - self.last_step_time) >= self.period_seconds)
                 
+                # Store actions from previous step for rendering
+                if not hasattr(self, '_previous_actions'):
+                    self._previous_actions = []
+                
+                # Update spoke bar heights with smooth animation
+                self._update_spoke_bar_heights(current_time)
+                
+                # Always render frame using previous simulation state
+                # This ensures the renderer sees aircraft in RETURN_ENROUTE before they teleport to HUB
+                self.render_frame(self._previous_actions, 1.0)
+                
                 if should_step:
-                    # Update simulation (only if not completed)
+                    # Update simulation AFTER rendering (only if not completed)
                     actions = self.sim.step_period()
                     self.last_step_time = current_time  # Update last step time
                     self.current_frame += self.frames_per_period
+                    
+                    # Store actions for next frame's rendering
+                    self._previous_actions = actions if actions is not None else []
                     
                     # Clear completed aircraft segments at period boundaries
                     completed_segments = [name for name, segment in self.aircraft_segments.items() 
@@ -1274,16 +1298,7 @@ class Renderer(VizState):
                         self.simulation_completed = True
                         self.completion_time = time.time()
                         # Continue to render the final state
-                        actions = []  # Use empty actions for final render
-                else:
-                    # Use empty actions when not stepping
-                    actions = []
-                
-                # Update spoke bar heights with smooth animation
-                self._update_spoke_bar_heights(current_time)
-                
-                # Always render frame (even when completed)
-                self.render_frame(actions, 1.0)
+                        self._previous_actions = []  # Use empty actions for final render
                 
                 # If paused, draw pause menu overlay
                 if self.paused:

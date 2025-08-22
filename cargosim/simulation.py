@@ -220,7 +220,8 @@ class LogisticsSim:
                 i = ac.plan[0] if ac.plan else 0
                 ac.state = "AT_SPOKEA"
                 ac.location = f"S{i+1}"
-            if ac.state == "AT_SPOKEA":
+                continue
+            elif ac.state == "AT_SPOKEA":
                 i = ac.plan[0]
                 self.arrivals_next[i].append(ac.payload_A[:])
                 if is_ops_capable(_row_to_spoke(self.stock[i])):
@@ -240,11 +241,12 @@ class LogisticsSim:
                         actions_this_period.append((ac.name, f"MOVE S{i+1}→HUB"))
                         consume_event()
                 continue
-            if ac.state == "AT_SPOKEB_ENROUTE":
+            elif ac.state == "AT_SPOKEB_ENROUTE":
                 j = ac.plan[1] if ac.plan else 0
                 ac.state = "AT_SPOKEB"
                 ac.location = f"S{j+1}"
-            if ac.state == "AT_SPOKEB":
+                continue
+            elif ac.state == "AT_SPOKEB":
                 j = ac.plan[1]
                 self.arrivals_next[j].append(ac.payload_B[:])
                 if is_ops_capable(_row_to_spoke(self.stock[j])):
@@ -258,7 +260,9 @@ class LogisticsSim:
                     actions_this_period.append((ac.name, f"MOVE S{j+1}→HUB"))
                     consume_event()
                 continue
-            if ac.state == "RETURN_ENROUTE":
+            elif ac.state == "RETURN_ENROUTE":
+                # Complete return flight in next period, not immediately
+                # This allows the renderer to animate the return journey
                 ac.location = "HUB"
                 ac.state = "IDLE"
                 continue
