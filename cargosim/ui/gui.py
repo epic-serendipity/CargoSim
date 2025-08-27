@@ -397,72 +397,10 @@ class ControlGUI:
             self.capability_vars[capability] = var
         
         # Center column now unused (help removed); keep placeholder frame for layout simplicity
+        # Center column is now empty (all help sections removed)
+        # Keep frame for layout consistency but no content
         center_frame = ttk.Frame(tab, style="Card.TFrame")
         center_frame.grid(row=0, column=1, sticky="nsew", padx=6, pady=(0, 8))
-        
-        # Advanced Decision Making Section
-        adv_frame = ttk.LabelFrame(left_frame, text="Advanced Decision Making", padding=20)
-        adv_frame.grid(row=3, column=0, sticky="ew", pady=(0, 16))
-        adv_frame.grid_columnconfigure(1, weight=1)
-        
-        # Enable advanced decision making
-        adv_enable_row = ttk.Frame(adv_frame)
-        adv_enable_row.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        self.adv_decision_var = tk.BooleanVar(value=self.cfg.advanced_decision_making)
-        ttk.Checkbutton(adv_enable_row, text="Enable advanced decision making", 
-                       variable=self.adv_decision_var, style="Checkbutton.TCheckbutton").grid(row=0, column=0, sticky="w")
-        
-        # Decision interval
-        ttk.Label(adv_frame, text="Decision interval (periods):", style="Header.TLabel", 
-                 width=20, anchor="w").grid(row=1, column=0, sticky="w", pady=(12, 0))
-        self.adv_decision_interval_var = tk.IntVar(value=self.cfg.advanced_decision_interval)
-        ttk.Spinbox(adv_frame, from_=1, to=100, textvariable=self.adv_decision_interval_var, 
-                   width=15, justify="center").grid(row=1, column=1, sticky="w", padx=(16, 0))
-        
-        # Statistics Display Section
-        stats_frame = ttk.LabelFrame(left_frame, text="Statistics Display", padding=20)
-        stats_frame.grid(row=4, column=0, sticky="ew")
-        stats_frame.grid_columnconfigure(1, weight=1)
-        
-        ttk.Label(stats_frame, text="Display mode:", style="Header.TLabel", 
-                 width=20, anchor="w").grid(row=0, column=0, sticky="w")
-        self.stats_mode_var = tk.StringVar(value=self.cfg.stats_mode)
-        stats_menu = ttk.OptionMenu(stats_frame, self.stats_mode_var, self.cfg.stats_mode, "total", "average")
-        stats_menu.grid(row=0, column=1, sticky="w", padx=(16, 0))
-        
-        # Resource Management Help Section
-        resource_help_frame = ttk.LabelFrame(center_frame, text="Resource Management", padding=16)
-        resource_help_frame.grid(row=1, column=0, sticky="ew", pady=(0, 16))
-        resource_help_frame.grid_columnconfigure(0, weight=1)
-        
-        resource_help_text = [
-            "• Initial Stocks: Starting resource levels at each spoke",
-            "• Consumption Rates: How quickly resources are used up",
-            "• A (Food): Daily sustenance for personnel",
-            "• B (Fuel): Aircraft fuel consumption",
-            "• C (Weapons): Ammunition and ordnance",
-            "• D (Spares): Maintenance parts and supplies"
-        ]
-        
-        for i, help_line in enumerate(resource_help_text):
-            ttk.Label(resource_help_frame, text=f"• {help_line}", style="Muted.TLabel", 
-                     wraplength=350).grid(row=i, column=0, sticky="w", pady=6)
-        
-        # Advanced Features Help Section
-        advanced_help_frame = ttk.LabelFrame(center_frame, text="Advanced Features", padding=16)
-        advanced_help_frame.grid(row=2, column=0, sticky="ew")
-        advanced_help_frame.grid_columnconfigure(0, weight=1)
-        
-        advanced_help_text = [
-            "• Advanced Decision Making: Enables periodic route optimization",
-            "• Decision Interval: How often to recalculate optimal routes",
-            "• Statistics Mode: Choose between total counts or averages",
-            "• Unlimited Storage: Remove resource storage constraints"
-        ]
-        
-        for i, help_line in enumerate(advanced_help_text):
-            ttk.Label(advanced_help_frame, text=f"• {help_line}", style="Muted.TLabel", 
-                     wraplength=350).grid(row=i, column=0, sticky="w", pady=6)
         
         # Right column - Quick Actions (Column 2)
         right_frame = ttk.Frame(tab, style="Card.TFrame")
@@ -501,6 +439,11 @@ class ControlGUI:
         left_frame = ttk.Frame(tab, style="Card.TFrame")
         left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 8))
         left_frame.grid_columnconfigure(0, weight=1)
+        
+        # Center side - Help Sections (Column 1)
+        center_frame = ttk.Frame(tab, style="Card.TFrame")
+        center_frame.grid(row=0, column=1, sticky="nsew", padx=6, pady=(0, 8))
+        center_frame.grid_columnconfigure(0, weight=1)
         
         # Simulation Timing Section
         timing_frame = ttk.LabelFrame(left_frame, text="Simulation Timing", padding=20)
@@ -657,69 +600,8 @@ class ControlGUI:
             ttk.Spinbox(cadence_frame, from_=1, to=30, textvariable=var, 
                        width=12, justify="center").grid(row=row, column=col+1, sticky="w", padx=(12, 0))
         
-        # Advanced Decision Making Section
-        adv_frame = ttk.LabelFrame(left_frame, text="Advanced Decision Making", padding=20)
-        adv_frame.grid(row=3, column=0, sticky="ew", pady=(0, 16))
-        adv_frame.grid_columnconfigure(1, weight=1)
-        
-        # Enable advanced decision making
-        adv_enable_row = ttk.Frame(adv_frame)
-        adv_enable_row.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        self.adv_decision_var = tk.BooleanVar(value=self.cfg.advanced_decision_making)
-        ttk.Checkbutton(adv_enable_row, text="Enable advanced decision making", 
-                       variable=self.adv_decision_var, style="Checkbutton.TCheckbutton").grid(row=0, column=0, sticky="w")
-        
-        # Decision interval
-        ttk.Label(adv_frame, text="Decision interval (periods):", style="Header.TLabel", 
-                 width=20, anchor="w").grid(row=1, column=0, sticky="w", pady=(12, 0))
-        self.adv_decision_interval_var = tk.IntVar(value=self.cfg.advanced_decision_interval)
-        ttk.Spinbox(adv_frame, from_=1, to=100, textvariable=self.adv_decision_interval_var, 
-                   width=15, justify="center").grid(row=1, column=1, sticky="w", padx=(16, 0))
-        
-        # Statistics Display Section
-        stats_frame = ttk.LabelFrame(left_frame, text="Statistics Display", padding=20)
-        stats_frame.grid(row=4, column=0, sticky="ew")
-        stats_frame.grid_columnconfigure(1, weight=1)
-        
-        ttk.Label(stats_frame, text="Display mode:", style="Header.TLabel", 
-                 width=20, anchor="w").grid(row=0, column=0, sticky="w")
-        self.stats_mode_var = tk.StringVar(value=self.cfg.stats_mode)
-        stats_menu = ttk.OptionMenu(stats_frame, self.stats_mode_var, self.cfg.stats_mode, "total", "average")
-        stats_menu.grid(row=0, column=1, sticky="w", padx=(16, 0))
-        
-        # Resource Management Help Section
-        resource_help_frame = ttk.LabelFrame(center_frame, text="Resource Management", padding=16)
-        resource_help_frame.grid(row=1, column=0, sticky="ew", pady=(0, 16))
-        resource_help_frame.grid_columnconfigure(0, weight=1)
-        
-        resource_help_text = [
-            "• Initial Stocks: Starting resource levels at each spoke",
-            "• Consumption Rates: How quickly resources are used up",
-            "• A (Food): Daily sustenance for personnel",
-            "• B (Fuel): Aircraft fuel consumption",
-            "• C (Weapons): Ammunition and ordnance",
-            "• D (Spares): Maintenance parts and supplies"
-        ]
-        
-        for i, help_line in enumerate(resource_help_text):
-            ttk.Label(resource_help_frame, text=f"• {help_line}", style="Muted.TLabel", 
-                     wraplength=350).grid(row=i, column=0, sticky="w", pady=6)
-        
-        # Advanced Features Help Section
-        advanced_help_frame = ttk.LabelFrame(center_frame, text="Advanced Features", padding=16)
-        advanced_help_frame.grid(row=2, column=0, sticky="ew")
-        advanced_help_frame.grid_columnconfigure(0, weight=1)
-        
-        advanced_help_text = [
-            "• Advanced Decision Making: Enables periodic route optimization",
-            "• Decision Interval: How often to recalculate optimal routes",
-            "• Statistics Mode: Choose between total counts or averages",
-            "• Unlimited Storage: Remove resource storage constraints"
-        ]
-        
-        for i, help_line in enumerate(advanced_help_text):
-            ttk.Label(advanced_help_frame, text=f"• {help_line}", style="Muted.TLabel", 
-                     wraplength=350).grid(row=i, column=0, sticky="w", pady=6)
+        # (Advanced Decision Making and Statistics sections removed)
+        # (Help sections removed)
         
         # Right column - Quick Actions (Column 2)
         right_frame = ttk.Frame(tab, style="Card.TFrame")
@@ -1660,9 +1542,7 @@ class ControlGUI:
             # Schedule tab - pair_order is now handled automatically by the simulation
             # No need to read from GUI as it's managed internally
             
-            self.cfg.advanced_decision_making = self.adv_decision_var.get()
-            self.cfg.advanced_decision_interval = self.adv_decision_interval_var.get()
-            self.cfg.stats_mode = self.stats_mode_var.get()
+            # (Advanced decision making and stats mode variables removed)
             
             # Visual tab
             setattr(self.cfg, "viz_include_side_panels", self.include_side_panels_var.get())
@@ -1878,9 +1758,7 @@ class ControlGUI:
             self.c_days.set(2)
             self.d_days.set(2)
         
-        self.adv_decision_var.set(False)
-        self.adv_decision_interval_var.set(10)
-        self.stats_mode_var.set("total")
+        # (Advanced decision making and stats mode variables removed)
         
         # Update parameter summary
         self._update_param_summary()
