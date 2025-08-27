@@ -1,0 +1,61 @@
+{
+  "config_version": 7,
+  "fleet_label": "2xC130",
+  "periods": 60,
+  "init": [4, 4, 2, 2],
+  "cadence": [2, 2, 3, 4],
+  "capacities": {"C130": 6, "C27": 3},
+  "rest": {"C130": 6, "C27": 12},
+  "pair_order": [[0,1],[2,3],[4,5],[6,7],[8,9]],
+  "period_seconds": 1.0,
+  "show_aircraft_labels": false,
+  "unlimited_storage": true,
+  "debug_mode": true,
+  "stats_mode": "total",
+  "right_panel_view": "ops_total_sparkline",
+  "orient_aircraft": true,
+  "show_dos_tooltips": true,
+  "hud_show_churn": true,
+  "cursor_color": "Cobalt",
+  "advanced_decision_making": false,
+  "advanced_decision_interval": 10,
+  "viz_include_side_panels": true,
+  "viz_show_stats_overlay": false,
+  "viz_right_panel_mode": "ops_total_sparkline",
+  "fps": 60,
+  "seed": 42,
+  "launch_fullscreen": false,
+  "smart_targeting_enabled": true,
+  "smart_targeting_config": {
+    "w_ops": 1.0,
+    "w_need": 0.6,
+    "w_dist": 0.8,
+    "w_cong": 0.7,
+    "max_aircraft_per_spoke_per_period": 2,
+    "second_leg_multiplier": 0.7,
+    "fairness_decay": 0.8,
+    "jitter_percent": 0.01
+  },
+  "theme": {
+    "preset": "Classic Light",
+    "theme_version": 2,
+    "ac_colorset": "Classic",
+    "ac_colors": {
+      "C-130": "#2E86AB",
+      "C-27": "#A23B72"
+    }
+  },
+  "recording": {
+    "enabled": false,
+    "fps": 30,
+    "last_fullscreen_size": [1920, 1080]
+  },
+  "adm": {
+    "enabled": false,
+    "interval": 10,
+    "seed": 42
+  },
+  "gameplay": {
+    "seed": 42
+  }
+}

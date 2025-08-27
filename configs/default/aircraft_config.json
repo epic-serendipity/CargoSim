@@ -1,0 +1,198 @@
+{
+  "config_version": 2,
+  "aircraft_types": {
+    "C-130": {
+      "name": "C-130 Hercules",
+      "description": "Medium tactical transport aircraft",
+      "base_capacity": 6,
+      "rest_periods": 6,
+      "range_factor": 1.0,
+      "fuel_efficiency": 1.0,
+      "maintenance_cost": 1.0,
+      "special_capabilities": [
+        "tactical",
+        "short_field"
+      ],
+      "color": "#3b82f6",
+      "icon": "C130",
+      "default_count": 2,
+      "is_custom": false,
+      "custom_attributes": {},
+      "cruise_speed_mach": 0.45,
+      "turnover_time_base": 2.0,
+      "fuel_consumption_per_hour": 1.2,
+      "operational_range_miles": 1000.0
+    },
+    "C-27": {
+      "name": "C-27J Spartan",
+      "description": "Light tactical transport aircraft",
+      "base_capacity": 3,
+      "rest_periods": 12,
+      "range_factor": 0.8,
+      "fuel_efficiency": 1.2,
+      "maintenance_cost": 0.8,
+      "special_capabilities": [
+        "tactical",
+        "fuel_efficient"
+      ],
+      "color": "#10b981",
+      "icon": "C27",
+      "default_count": 0,
+      "is_custom": false,
+      "custom_attributes": {},
+      "cruise_speed_mach": 0.35,
+      "turnover_time_base": 1.5,
+      "fuel_consumption_per_hour": 0.8,
+      "operational_range_miles": 800.0
+    },
+    "C-17": {
+      "name": "C-17 Globemaster III",
+      "description": "Heavy strategic transport aircraft",
+      "base_capacity": 15,
+      "rest_periods": 8,
+      "range_factor": 1.5,
+      "fuel_efficiency": 0.9,
+      "maintenance_cost": 1.5,
+      "special_capabilities": [
+        "strategic",
+        "long_range",
+        "heavy_lift"
+      ],
+      "color": "#8b5cf6",
+      "icon": "C17",
+      "default_count": 0,
+      "is_custom": false,
+      "custom_attributes": {},
+      "cruise_speed_mach": 0.77,
+      "turnover_time_base": 3.0,
+      "fuel_consumption_per_hour": 2.5,
+      "operational_range_miles": 2000.0
+    },
+    "C-5": {
+      "name": "C-5 Galaxy",
+      "description": "Super heavy strategic transport aircraft",
+      "base_capacity": 25,
+      "rest_periods": 10,
+      "range_factor": 2.0,
+      "fuel_efficiency": 0.7,
+      "maintenance_cost": 2.0,
+      "special_capabilities": [
+        "strategic",
+        "maximum_lift",
+        "global_reach"
+      ],
+      "color": "#ef4444",
+      "icon": "C5",
+      "default_count": 0,
+      "is_custom": false,
+      "custom_attributes": {},
+      "cruise_speed_mach": 0.77,
+      "turnover_time_base": 4.0,
+      "fuel_consumption_per_hour": 4.0,
+      "operational_range_miles": 3000.0
+    },
+    "C-295": {
+      "name": "C-295 Medium Transport",
+      "description": "Medium tactical transport aircraft with good fuel efficiency",
+      "base_capacity": 5,
+      "rest_periods": 8,
+      "range_factor": 0.9,
+      "fuel_efficiency": 1.3,
+      "maintenance_cost": 0.7,
+      "special_capabilities": [
+        "tactical",
+        "fuel_efficient",
+        "medium_range"
+      ],
+      "color": "#f59e0b",
+      "icon": "C295",
+      "default_count": 0,
+      "is_custom": false,
+      "custom_attributes": {},
+      "cruise_speed_mach": 0.4,
+      "turnover_time_base": 1.8,
+      "fuel_consumption_per_hour": 0.9,
+      "operational_range_miles": 900.0
+    },
+    "Custom_Transport": {
+      "name": "Custom Transport",
+      "description": "High-capacity custom transport aircraft with unique visual effects",
+      "base_capacity": 4,
+      "rest_periods": 8,
+      "range_factor": 1.0,
+      "fuel_efficiency": 1.0,
+      "maintenance_cost": 1.0,
+      "special_capabilities": [],
+      "color": "#8b5cf6",
+      "icon": "Custom",
+      "default_count": 3,
+      "is_custom": true,
+      "custom_attributes": {
+        "capacity": 6.0,
+        "rest_periods": 6.0,
+        "range_factor": 1.2,
+        "fuel_efficiency": 0.9,
+        "maintenance_cost": 1.2
+      },
+      "cruise_speed_mach": 0.5,
+      "turnover_time_base": 2.5,
+      "fuel_consumption_per_hour": 1.1,
+      "operational_range_miles": 1200.0
+    }
+  },
+  "fleet_presets": {
+    "Light Fleet": {
+      "description": "Small, efficient fleet for limited operations",
+      "aircraft": {
+        "C-27": 2
+      }
+    },
+    "Standard Fleet": {
+      "description": "Balanced fleet for typical operations",
+      "aircraft": {
+        "C-130": 2
+      }
+    },
+    "Heavy Fleet": {
+      "description": "High-capacity fleet for intensive operations",
+      "aircraft": {
+        "C-130": 4
+      }
+    },
+    "Mixed Fleet": {
+      "description": "Flexible fleet with multiple aircraft types",
+      "aircraft": {
+        "C-130": 2,
+        "C-27": 2
+      }
+    },
+    "Strategic Fleet": {
+      "description": "Long-range, high-capacity strategic fleet",
+      "aircraft": {
+        "C-17": 2,
+        "C-130": 2
+      }
+    },
+    "Demo Fleet": {
+      "description": "A demonstration fleet with mixed aircraft types",
+      "aircraft": {
+        "C-130": 2,
+        "C-17": 1,
+        "C-27": 1
+      }
+    },
+    "Custom Fleet": {
+      "description": "Fleet with custom transport aircraft",
+      "aircraft": {
+        "C-130": 1,
+        "Custom_Transport": 2
+      }
+    },
+    "Custom Aircraft Demo": {
+      "description": "Demo fleet showcasing enhanced custom aircraft visuals",
+      "aircraft": {
+        "Custom_Transport": 3
+      }
+    }
+  }
+}

@@ -404,33 +404,27 @@ class FleetBuilder:
         """Return a sensible default fleet mapping aircraft_id -> count.
 
         Priority order:
-        1. Preset named "Default" in the config file (if present).
-        2. Hard-coded fallback of 2 × C-130.
+        1. Hard-coded fallback of 2 × C-130.
+        2. Last-chance fallback: pick *any* available aircraft type.
         """
-        # 1) Use a preset named "Default" if present.
-        preset = self.config_manager.get_fleet_preset("Default")
-        if preset:
-            return preset.aircraft.copy()
-
-        # 2) Fallback to a hard-coded choice, **but only if it actually exists**
+        # 1) Hard-coded fallback of 2 × C-130, **but only if it actually exists**
         #    in the current configuration.  User-level config files may not
         #    include the built-in examples (e.g. "C-130"), and trying to use a
         #    missing aircraft ID breaks later validation in the GUI.
         if "C-130" in self.config_manager.aircraft_types:
             return {"C-130": 2}
 
-        # 3) Last-chance fallback: pick *any* available aircraft type so that the
+        # 2) Last-chance fallback: pick *any* available aircraft type so that the
         #    application can still start even if the configuration is highly
         #    customised or minimal.
         if self.config_manager.aircraft_types:
             first_aircraft_id = next(iter(self.config_manager.aircraft_types))
             return {first_aircraft_id: 2}
 
-        # 4) If no aircraft types are available at all, return an empty fleet –
+        # 3) If no aircraft types are available at all, return an empty fleet –
         #    the GUI will display the appropriate empty-state instead of
         #    crashing.
         return {}
-        # -------------------------------------------------------------------------
 
     def _load_default_fleet(self) -> None:
         """Load a default fleet composition if no temporary fleet is set."""
@@ -620,6 +614,14 @@ class FleetBuilder:
             "operational_cost": self.current_fleet.operational_cost,
             "efficiency_score": self.current_fleet.efficiency_score
         }
+    
+    def get_current_fleet(self) -> Dict[str, int]:
+        """Get the current fleet from the Fleet Builder pallet.
+        
+        Returns:
+            Dict[str, int]: Mapping of aircraft_id -> count for the current fleet
+        """
+        return self.current_fleet.aircraft.copy()
     
     def load_fleet_from_config(self, fleet_config: Dict[str, Any]) -> bool:
         """Load fleet from configuration data."""

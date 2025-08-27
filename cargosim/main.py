@@ -5,12 +5,16 @@ import subprocess
 import sys
 import tkinter as tk
 from tkinter import messagebox
+import argparse
 
-from .config import SimConfig, load_config, save_config, validate_config
-from .simulation import LogisticsSim
-from .renderer import Renderer
-from .gui import ControlGUI
-from .utils import setup_logging, get_logger, setup_runtime_logging, log_runtime_event, log_exception
+from .core.config import SimConfig, load_config, save_config, validate_config
+from .core.simulation import LogisticsSim
+from .rendering.renderer import Renderer
+from .ui.gui import ControlGUI
+from .core.utils import setup_logging, get_logger, setup_runtime_logging, log_runtime_event, log_exception
+from .core.error_handler import get_error_handler, handle_error, error_handler_decorator
+from .core.font_error_suppressor import get_font_limiter, install_font_error_limiting
+from .core.stderr_filter import install_stderr_limiter, get_stderr_limiter
 
 
 def _pip_install(pkgs: list[str]) -> bool:
@@ -80,12 +84,10 @@ def check_and_offer_installs(startup_root: tk.Tk):
         log_runtime_event("pygame available, enabling simulation features")
         if hasattr(startup_root, 'start_btn'):
             startup_root.start_btn.state(["!disabled"])
-        if hasattr(startup_root, 'offline_btn'):
-            startup_root.offline_btn.state(["!disabled"])
     
     # Optional: imageio & imageio-ffmpeg
     log_runtime_event("Checking MP4 recording dependencies")
-    from .utils import _mp4_available
+    from .core.utils import _mp4_available
     if not _mp4_available()[0]:
         logger.warning("MP4 recording not available")
         log_runtime_event("MP4 recording not available")
@@ -319,7 +321,7 @@ def render_offline(cfg: SimConfig):
             self.clock = None
 
             # Initialize remaining attributes
-            from .config import CURSOR_COLORS, hex2rgb
+            from .core.config import CURSOR_COLORS, hex2rgb
             self.cursor_col = hex2rgb(CURSOR_COLORS.get(self.sim.cfg.cursor_color, CURSOR_COLORS["Cobalt"]))
             self.ac_colors = {k: hex2rgb(v) for k, v in self.sim.cfg.theme.ac_colors.items()}
             self.bar_cols = [self.tt.bar_A, self.tt.bar_B, self.tt.bar_C, self.tt.bar_D]
@@ -344,14 +346,14 @@ def render_offline(cfg: SimConfig):
     frames_per_period = max(1, rc.frames_per_period)
 
     fmt = rc.offline_fmt
-    from .utils import _mp4_available
+    from .core.utils import _mp4_available
     ok, _ = _mp4_available()
     if fmt == "mp4" and not ok:
         logger.warning("MP4 rendering requires imageio-ffmpeg; writing PNG frames instead.")
         fmt = "png"
     ext = ".mp4" if fmt == "mp4" else ".png"
     out_file = rc.offline_output_path or os.path.join(os.getcwd(), f"offline_render{ext}")
-    from .recorder import Recorder
+    from .rendering.recorder import Recorder
     recorder = Recorder.for_offline(file_path=out_file, fps=rc.offline_fps, fmt=fmt)
 
     try:
@@ -375,10 +377,10 @@ def render_offline(cfg: SimConfig):
 def theme_sweep(out_dir: str = "_theme_sweep"):
     """Generate theme preview images."""
     os.makedirs(out_dir, exist_ok=True)
-    from .config import THEME_PRESETS, AIRFRAME_COLORSETS
+    from .core.config import THEME_PRESETS, AIRFRAME_COLORSETS
     for name in THEME_PRESETS.keys():
         cfg = SimConfig()
-        from .config import apply_theme_preset
+        from .core.config import apply_theme_preset
         apply_theme_preset(cfg.theme, name)
         if cfg.theme.ac_colorset:
             cfg.theme.ac_colors = AIRFRAME_COLORSETS[cfg.theme.ac_colorset]
@@ -396,7 +398,7 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
                 return c/12.92 if c <= 0.03928 else ((c+0.055)/1.055) ** 2.4
             r,g,b = [chan(x) for x in rgb]
             return 0.2126*r + 0.7152*g + 0.0722*b
-        from .config import hex2rgb
+        from .core.config import hex2rgb
         fg = hex2rgb(cfg.theme.game_fg); bg = hex2rgb(cfg.theme.game_bg)
         L1, L2 = luminance(fg), luminance(bg)
         ratio = (max(L1,L2)+0.05)/(min(L1,L2)+0.05)
@@ -411,64 +413,89 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
     logger.info(f"Theme sweep output written to {out_dir}")
 
 
+@error_handler_decorator(context="main function", severity="ERROR")
 def main(*, force_windowed: bool = False):
     """Main entry point for the GUI."""
-    try:
-        # Setup runtime logging at the start of main()
-        runtime_logger = setup_runtime_logging()
-        log_runtime_event("Starting CargoSim main function", f"force_windowed={force_windowed}")
-        
-        # dependencies prompt on startup
-        log_runtime_event("Creating temporary Tkinter root for dependency check")
-        tmp = tk.Tk()
-        tmp.withdraw()
-        
-        log_runtime_event("Checking and offering dependency installations")
-        check_and_offer_installs(tmp)
-        
-        log_runtime_event("Destroying temporary root")
-        tmp.destroy()
+    # Setup runtime logging at the start of main()
+    runtime_logger = setup_runtime_logging()
+    log_runtime_event("Starting CargoSim main function", f"force_windowed={force_windowed}")
+    
+    # Initialize error handler
+    error_handler = get_error_handler()
+    log_runtime_event("Error handler initialized")
+    
+    # Install font error limiting system
+    font_limiter = get_font_limiter()
+    log_runtime_event("Font error limiting system initialized")
+    
+    # Install stderr limiting system
+    stderr_limiter = get_stderr_limiter()
+    log_runtime_event("Stderr limiting system initialized")
+    
+    # dependencies prompt on startup
+    log_runtime_event("Creating temporary Tkinter root for dependency check")
+    tmp = tk.Tk()
+    tmp.withdraw()
+    
+    log_runtime_event("Checking and offering dependency installations")
+    check_and_offer_installs(tmp)
+    
+    log_runtime_event("Destroying temporary root")
+    tmp.destroy()
 
-        log_runtime_event("Loading configuration")
-        cfg = load_config()
-        log_runtime_event("Configuration loaded successfully", f"config_version={cfg.config_version}")
+    log_runtime_event("Loading configuration")
+    cfg = load_config()
+    log_runtime_event("Configuration loaded successfully", f"config_version={cfg.config_version}")
 
-        log_runtime_event("Creating main Tkinter root window")
-        root = tk.Tk()
-        log_runtime_event("Main root window created")
-        
-        # Apply the comprehensive theme system early in startup
-        log_runtime_event("Importing UI theme modules")
-        from .ui_theme import apply_theme, create_palette_from_theme_config
-        
-        log_runtime_event("Creating theme palette from configuration")
-        palette = create_palette_from_theme_config(cfg.theme)
-        log_runtime_event("Theme palette created", f"palette_keys={list(palette.keys())}")
-        
-        log_runtime_event("Applying comprehensive theme to root window")
-        apply_theme(root, palette)
-        log_runtime_event("Theme applied successfully")
-        
-        log_runtime_event("Creating ControlGUI instance")
-        ControlGUI(root, cfg, force_windowed=force_windowed)
-        log_runtime_event("ControlGUI created successfully")
-        
-        log_runtime_event("Starting Tkinter mainloop")
-        root.mainloop()
-        log_runtime_event("Tkinter mainloop completed")
-        
-    except Exception as e:
-        log_exception(e, "main function")
-        # Re-raise to ensure the error is visible
-        raise
+    log_runtime_event("Creating main Tkinter root window")
+    root = tk.Tk()
+    log_runtime_event("Main root window created")
+    
+    # Apply the comprehensive theme system early in startup
+    log_runtime_event("Importing UI theme modules")
+    from .rendering.themes.ui_theme import apply_theme, create_palette_from_theme_config
+    
+    log_runtime_event("Creating theme palette from configuration")
+    palette = create_palette_from_theme_config(cfg.theme)
+    log_runtime_event("Theme palette created", f"palette_keys={list(palette.keys())}")
+    
+    log_runtime_event("Applying comprehensive theme to root window")
+    apply_theme(root, palette)
+    log_runtime_event("Theme applied successfully")
+    
+    log_runtime_event("Creating ControlGUI instance")
+    ControlGUI(root, cfg, force_windowed=force_windowed)
+    log_runtime_event("ControlGUI created successfully")
+    
+    log_runtime_event("Starting Tkinter mainloop")
+    root.mainloop()
+    log_runtime_event("Tkinter mainloop completed")
 
 
 if __name__ == "__main__":
+    # Setup runtime logging at startup
+    runtime_logger = setup_runtime_logging()
+    log_runtime_event("CargoSim startup initiated", f"argv={sys.argv}")
+    
+    # Initialize error handler
+    error_handler = get_error_handler()
+    
+    # Install font error limiting system
+    font_limiter = get_font_limiter()
+    
+    # Install stderr limiting system
+    stderr_limiter = get_stderr_limiter()
+    
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--reset-configs', action='store_true')
+    known, _ = parser.parse_known_args()
+    if known.reset_configs:
+        from cargosim.core.utils import reset_user_configs
+        reset_user_configs()
+        print('User configuration files deleted. Exiting.').__str__()
+        sys.exit(0)
+
     try:
-        # Setup runtime logging at startup
-        runtime_logger = setup_runtime_logging()
-        log_runtime_event("CargoSim startup initiated", f"argv={sys.argv}")
-        
         if "--offline-render" in sys.argv:
             log_runtime_event("Offline render mode detected")
             cfg = load_config()
@@ -484,9 +511,17 @@ if __name__ == "__main__":
             main(force_windowed="--windowed" in sys.argv)
             
     except Exception as e:
+        # Use the new error handling system
+        handle_error(e, "main entry point", "CRITICAL")
         log_exception(e, "main entry point")
+        
         # Print to stderr to ensure error is visible
         print(f"FATAL ERROR: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
+        
+        # Get error summary for debugging
+        error_summary = error_handler.get_error_summary()
+        print(f"Error Summary: {error_summary}", file=sys.stderr)
+        
         sys.exit(1)

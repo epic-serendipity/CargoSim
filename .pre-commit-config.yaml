@@ -1,0 +1,42 @@
+repos:
+  - repo: local
+    hooks:
+      - id: test-imports
+        name: Test Imports
+        entry: python scripts/test_imports.py
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+        
+      - id: test-paths
+        name: Test Paths
+        entry: python scripts/test_paths.py
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+        
+      - id: check-python-syntax
+        name: Check Python Syntax
+        entry: python -m py_compile
+        language: system
+        types: [python]
+        pass_filenames: true
+        stages: [commit]
+
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        language_version: python3
+        types: [python]
+        stages: [commit]
+
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.1.6
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        types: [python]
+        stages: [commit]

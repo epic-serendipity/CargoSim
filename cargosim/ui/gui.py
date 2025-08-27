@@ -1914,20 +1914,8 @@ class ControlGUI:
                         }
                         self.fleet_builder_tab.load_fleet_from_config(fleet_config)
                     else:
-                        # Try to load as preset
-                        preset = self.fleet_builder_tab.fleet_builder.config_manager.get_fleet_preset(self.cfg.fleet_label)
-                        if preset:
-                            fleet_composition = self.fleet_builder_tab.fleet_builder.create_fleet_from_preset(self.cfg.fleet_label)
-                            if fleet_composition:
-                                fleet_config = {
-                                    "name": fleet_composition.name,
-                                    "aircraft": fleet_composition.aircraft
-                                }
-                                self.fleet_builder_tab.load_fleet_from_config(fleet_config)
-                            else:
-                                logger.warning(f"Could not create fleet from preset: {self.cfg.fleet_label}")
-                        else:
-                            logger.warning(f"Could not create fleet from label: {self.cfg.fleet_label}")
+                        # Fleet preset system removed - use current Fleet Builder pallet
+                        logger.info("Fleet preset system removed - using current Fleet Builder pallet")
                 else:
                     logger.warning("Fleet builder not available for loading fleet")
             except Exception as e:

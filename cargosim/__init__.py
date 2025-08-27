@@ -2,20 +2,37 @@
 
 __version__ = "0.1.0"
 
-from .config import (
+# Core functionality
+from .core.config import (
     SimConfig, load_config, save_config, apply_theme_preset,
     THEME_PRESETS, AIRFRAME_COLORSETS, CURSOR_COLORS, validate_config
 )
-from .simulation import LogisticsSim, Aircraft
-from .renderer import Renderer
-from .recorder import Recorder, NullRecorder
-from .gui import ControlGUI
-from .utils import clamp, ellipsize, setup_logging, get_logger
+from .core.simulation import LogisticsSim, Aircraft
+from .core.utils import clamp, ellipsize, setup_logging, get_logger
+
+# Rendering and visualization
+from .rendering.renderer import Renderer
+from .rendering.recorder import Recorder, NullRecorder
+
+# User interface
+from .ui.gui import ControlGUI
+
+# Advanced features
+from .features.smart_targeting import SmartTargeting
 
 __all__ = [
-    "SimConfig", "LogisticsSim", "Aircraft", "Renderer",
-    "Recorder", "NullRecorder", "ControlGUI", "load_config",
-    "save_config", "apply_theme_preset", "THEME_PRESETS",
+    # Core
+    "SimConfig", "LogisticsSim", "Aircraft", "validate_config",
+    "load_config", "save_config", "apply_theme_preset", "THEME_PRESETS",
     "AIRFRAME_COLORSETS", "CURSOR_COLORS", "clamp", "ellipsize",
-    "validate_config", "setup_logging", "get_logger"
+    "setup_logging", "get_logger",
+    
+    # Rendering
+    "Renderer", "Recorder", "NullRecorder",
+    
+    # UI
+    "ControlGUI",
+    
+    # Features
+    "SmartTargeting"
 ]

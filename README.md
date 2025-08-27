@@ -26,6 +26,9 @@ python -m cargosim --headless --periods 10 --seed 42
 
 # Windowed mode
 python -m cargosim --windowed
+
+# Custom aircraft demo
+python demo_custom_aircraft_visuals.py
 ```
 
 ## Architecture
@@ -58,6 +61,13 @@ cargosim/
 - **Five Built-in Themes**: GitHub Dark, Classic Light, Solarized Light, Night Ops, Cyber
 - **Customizable**: Cursor colors, overlay presets, aircraft color schemes
 - **Responsive**: Fullscreen and windowed modes with dynamic layout
+
+### Custom Aircraft
+- **Unique Visual Representation**: Airplane-like shape (pointed front, wider back with wings)
+- **Simple Design**: Clean appearance with subtle border, no fancy visual effects
+- **Motion Trails**: Simple, subtle trails during transit
+- **Basic Indicators**: Simple transit indicators without animations
+- **Color Schemes**: Dedicated colors for all aircraft types including custom aircraft
 
 ### Recording System
 - **Live Recording**: MP4 or PNG with async processing
@@ -200,3 +210,51 @@ This project is open source. See LICENSE file for details.
 - **Community**: Join discussions in the project repository
 
 --- *CargoSim - Professional logistics simulation with a modular, maintainable architecture.*
+
+### Fleet Builder
+The Fleet Builder provides a visual interface for creating and managing aircraft fleets:
+
+```bash
+# Launch the Fleet Builder GUI
+python demo_fleet_builder.py
+
+# Or use the integrated Fleet Builder tab in the main GUI
+python cargosim.py
+```
+
+**Features:**
+- Drag-and-drop aircraft placement
+- Fleet composition management
+- Preset fleet configurations
+- Custom aircraft configuration
+- Fleet performance metrics
+
+### Temporary Fleet System
+The temporary fleet system allows users to test custom fleets without saving them permanently:
+
+**Two Options:**
+1. **Save as Preset**: Saves fleet permanently to `aircraft_config.json`
+2. **Use Current Fleet**: Uses fleet temporarily for current session only
+
+**Benefits:**
+- Quick testing of experimental fleet configurations
+- No clutter in permanent presets
+- Session-based fleet management
+- Seamless integration with simulation
+
+**Usage:**
+1. Create fleet in Fleet Builder GUI
+2. Click "Use Current Fleet" for temporary use
+3. Fleet is immediately available for simulation
+4. Custom aircraft are fully visible and functional
+5. Use "Save as Preset" to make it permanent
+
+**Example Temporary Fleet:**
+```json
+{
+  "fleet_label": "TEMP_2xCustom_Transport_1xC130",
+  "periods": 30
+}
+```
+
+This creates a fleet with 2 Custom_Transport aircraft and 1 C-130, available only for the current session.

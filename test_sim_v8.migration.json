@@ -1,0 +1,9 @@
+{
+  "timestamp": "2025-08-24T19:58:54.347474",
+  "source_version": 8,
+  "target_version": 9,
+  "migration_type": "sim_config",
+  "backup_created": true,
+  "backup_path": "V:\\Projects\\Applications\\CargoSim\\configs\\default\\backups\\test_sim_v8_backup_20250824_195854.json",
+  "user_modified": false
+}

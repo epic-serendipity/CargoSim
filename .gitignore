@@ -24,7 +24,8 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-*.json
+cargo_sim_config.json
+sessions.json
 *.mp4
 *.png
 MANIFEST
@@ -63,6 +64,14 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+
+# CargoSim specific
+# Log files (runtime and debug)
+logs/runtime/*.log
+logs/debug/*.log
+
+# User-specific configurations
+configs/user/**
 
 # Flask stuff:
 instance/

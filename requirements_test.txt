@@ -1,0 +1,15 @@
+# Testing dependencies for CargoSim Error Handling System
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-xdist>=3.0.0
+pytest-mock>=3.10.0
+hypothesis>=6.75.0
+coverage>=7.0.0
+
+# Coverage reporting
+coverage>=6.0.0
+
+# Code quality tools (optional)
+# flake8>=5.0.0
+# black>=22.0.0
+# isort>=5.10.0

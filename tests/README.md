@@ -1,225 +1,280 @@
 # CargoSim Test Suite
 
-This directory contains the comprehensive test suite for the CargoSim project. All tests have been updated to work with the current codebase and provide reliable validation of the simulation functionality.
+This directory contains the comprehensive test suite for CargoSim.
 
-## Test Overview
+## Directory Structure
 
-- **Total Tests:** 19
-- **Test Files:** 5
-- **Coverage:** Core simulation, CLI, rendering, enhanced features, and operations
+### `unit/`
+Unit tests organized by module:
+- `core/` - Core simulation logic tests
+- `ui/` - User interface component tests
+- `rendering/` - Visualization and rendering tests
 
-## Test Files
+### `integration/`
+Integration tests that test multiple components together:
+- End-to-end simulation tests
+- Component interaction tests
+- Performance and stress tests
 
-### 1. `test_simulation.py` - Core Simulation Tests
-**Type:** Unit Tests  
-**Tests:** 11  
-**Coverage:** Aircraft management, fleet building, operations, resource management
-
-- **TestAircraft:** Aircraft creation, max active periods, hub location detection
-- **TestLogisticsSim:** Simulation initialization, world reset, fleet building, operations
-- **TestUtilityFunctions:** Row-to-spoke conversion, operational capability detection
-
-### 2. `test_cli_entrypoints.py` - Command Line Interface Tests
-**Type:** Unit Tests  
-**Tests:** 2  
-**Coverage:** CLI entry points, headless mode
-
-- Python module execution (`python -m cargosim`)
-- Headless simulation mode with exit codes
-
-### 3. `test_enhanced_features.py` - Enhanced Features Tests
-**Type:** Integration Tests  
-**Tests:** 1  
-**Coverage:** Aircraft animation, spoke bar scaling, state mapping
-
-- Aircraft state mapping system
-- Bar scaling modes (linear/geometric)
-- Animation toggle functionality
-- Bar height calculations
-
-### 4. `test_ops_gate.py` - Operations Gate Tests
-**Type:** Integration Tests  
-**Tests:** 3  
-**Coverage:** Operations synchronization, resource consumption, timing
-
-- UI synchronization with operations gate
-- C/D resource consumption during operations
-- Arrival timing and resource application
-
-### 5. `test_fullscreen.py` - Display Mode Tests
-**Type:** Integration Tests  
-**Tests:** 2  
-**Coverage:** Fullscreen and windowed display modes
-
-- Fullscreen mode functionality
-- Windowed mode functionality
-- Display initialization and configuration
+### `fixtures/`
+Test data and fixtures:
+- Sample configurations
+- Test aircraft definitions
+- Mock data for testing
 
 ## Test Categories
 
-### Unit Tests (`-m unit`)
-- **13 tests** - Fast, isolated tests for individual components
-- Focus on core simulation logic and CLI functionality
-- No external dependencies or complex setup required
+### Unit Tests
+**Purpose**: Test individual functions and classes in isolation
+**Coverage**: Core logic, configuration, utilities
+**Speed**: Fast execution
+**Dependencies**: Minimal external dependencies
 
-### Integration Tests (`-m integration`)
-- **6 tests** - Tests that require multiple components working together
-- Include pygame rendering, display initialization
-- Test real-world usage scenarios
+**Examples**:
+- `test_simulation.py` - Simulation logic tests
+- `test_config.py` - Configuration validation tests
+- `test_utils.py` - Utility function tests
+
+### Integration Tests
+**Purpose**: Test component interactions and system behavior
+**Coverage**: Multi-component scenarios, end-to-end workflows
+**Speed**: Slower execution
+**Dependencies**: Full system setup
+
+**Examples**:
+- `test_advanced_simulation.py` - Complex simulation scenarios
+- `test_fullscreen.py` - Display mode integration
+- `test_ops_gate.py` - Resource gating logic
+
+### UI Tests
+**Purpose**: Test user interface components
+**Coverage**: GUI elements, user interactions, fleet builder
+**Speed**: Medium execution
+**Dependencies**: Tkinter, GUI frameworks
+
+**Examples**:
+- `test_fleet_builder.py` - Fleet builder functionality
+- `test_gui.py` - Main GUI component tests
+
+### Rendering Tests
+**Purpose**: Test visualization and rendering
+**Coverage**: Pygame rendering, themes, recording
+**Speed**: Medium execution
+**Dependencies**: Pygame, graphics libraries
+
+**Examples**:
+- `test_renderer.py` - Core rendering tests
+- `test_recorder.py` - Recording functionality
+- `test_renderer_complete.py` - Full rendering pipeline
 
 ## Running Tests
 
 ### Basic Test Execution
 ```bash
 # Run all tests
-python -m pytest tests/
+pytest
 
 # Run with verbose output
-python -m pytest tests/ -v
+pytest -v
 
-# Run with short traceback
-python -m pytest tests/ --tb=short
+# Run specific test file
+pytest tests/unit/core/test_simulation.py
+
+# Run specific test function
+pytest tests/unit/core/test_simulation.py::test_simulation_initialization
 ```
 
 ### Test Categories
 ```bash
 # Run only unit tests
-python -m pytest tests/ -m unit
+pytest tests/unit/
 
 # Run only integration tests
-python -m pytest tests/ -m integration
+pytest tests/integration/
 
-# Run tests excluding slow ones
-python -m pytest tests/ -m "not slow"
+# Run tests by module
+pytest tests/unit/core/
+pytest tests/unit/ui/
+pytest tests/unit/rendering/
 ```
 
-### Specific Test Files
+### Test Markers
 ```bash
-# Run specific test file
-python -m pytest tests/test_simulation.py
+# Run fast tests only
+pytest -m "not slow"
 
-# Run specific test class
-python -m pytest tests/test_simulation.py::TestAircraft
+# Run integration tests
+pytest -m integration
 
-# Run specific test method
-python -m pytest tests/test_simulation.py::TestAircraft::test_aircraft_creation
+# Run unit tests
+pytest -m unit
+```
+
+### Coverage and Reporting
+```bash
+# Run with coverage
+pytest --cov=cargosim
+
+# Generate HTML coverage report
+pytest --cov=cargosim --cov-report=html
+
+# Generate XML coverage report
+pytest --cov=cargosim --cov-report=xml
 ```
 
 ## Test Configuration
 
-### `conftest.py`
-- **Common fixtures** for test configuration and simulation instances
-- **Environment setup** for pygame testing (SDL_VIDEODRIVER=dummy)
-- **Automatic test categorization** with pytest markers
-- **Proper cleanup** of pygame resources
+### pytest.ini
+```ini
+[tool:pytest]
+testpaths = tests
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+addopts = --strict-markers --strict-config --verbose --tb=short
+markers =
+    slow: marks tests as slow
+    integration: marks tests as integration tests
+    unit: marks tests as unit tests
+```
 
-### Test Fixtures
-- **`test_config`:** Basic simulation configuration
-- **`test_simulation`:** Pre-configured simulation instance
-- **`test_renderer`:** Initialized renderer with proper cleanup
+### conftest.py
+Contains shared fixtures and test configuration:
+- Database setup/teardown
+- Mock objects
+- Test data generation
+- Environment configuration
 
-## Environment Requirements
-
-### Required Dependencies
-- **Python 3.10+**
-- **pytest** - Test framework
-- **pygame** - Graphics library (for integration tests)
-
-### Optional Dependencies
-- **pytest-cov** - Coverage reporting
-- **pytest-xdist** - Parallel test execution
-
-## Test Environment Setup
-
-The test suite automatically configures the environment for testing:
-
-1. **SDL_VIDEODRIVER=dummy** - Prevents display issues in CI/headless environments
-2. **PYGAME_HIDE_SUPPORT_PROMPT=1** - Suppresses pygame welcome messages
-3. **Proper Python path** - Ensures imports work correctly
-
-## Writing New Tests
+## Test Writing Guidelines
 
 ### Test Structure
 ```python
-def test_feature_name():
-    """Test description of what is being tested."""
-    # Arrange - Set up test data
-    cfg = SimConfig()
-    sim = LogisticsSim(cfg)
+import pytest
+from cargosim.core import SimConfig
+
+class TestSimConfig:
+    def test_config_initialization(self):
+        """Test that SimConfig initializes correctly."""
+        config = SimConfig()
+        assert config.periods == 60
+        assert config.fleet_label == "2xC130"
     
-    # Act - Execute the functionality
-    result = sim.some_method()
-    
-    # Assert - Verify the results
-    assert result == expected_value
+    def test_config_validation(self):
+        """Test configuration validation."""
+        config = SimConfig()
+        config.periods = -1  # Invalid value
+        issues = validate_config(config)
+        assert "periods must be positive" in issues
 ```
 
-### Test Naming Conventions
-- **Test functions:** `test_descriptive_name`
-- **Test classes:** `TestClassName`
-- **Test files:** `test_module_name.py`
+### Best Practices
+1. **Descriptive Names**: Use clear, descriptive test names
+2. **Single Responsibility**: Each test should test one thing
+3. **Arrange-Act-Assert**: Structure tests clearly
+4. **Documentation**: Include docstrings explaining test purpose
+5. **Edge Cases**: Test boundary conditions and error cases
 
-### Test Categories
-- **Unit tests:** Test individual functions/methods in isolation
-- **Integration tests:** Test multiple components working together
-- **Slow tests:** Mark with `@pytest.mark.slow` for long-running tests
+### Test Data
+```python
+@pytest.fixture
+def sample_config():
+    """Provide a sample configuration for testing."""
+    return SimConfig(
+        fleet_label="TestFleet",
+        periods=10,
+        initial_stocks={"A": 5, "B": 5, "C": 5, "D": 5}
+    )
 
-## Troubleshooting
-
-### Common Issues
-
-1. **Import Errors**
-   - Ensure you're running from the project root
-   - Check that `conftest.py` is properly setting up the Python path
-
-2. **Pygame Display Issues**
-   - Tests automatically use `SDL_VIDEODRIVER=dummy`
-   - Ensure pygame is properly installed
-
-3. **Test Failures**
-   - Run with `-v` for verbose output
-   - Use `--tb=long` for detailed tracebacks
-   - Check that all dependencies are installed
-
-### Debug Mode
-```bash
-# Run tests with debug output
-python -m pytest tests/ -v -s
-
-# Run specific failing test
-python -m pytest tests/test_file.py::test_name -v -s
+def test_with_sample_config(sample_config):
+    """Test using the sample configuration fixture."""
+    assert sample_config.fleet_label == "TestFleet"
 ```
 
 ## Continuous Integration
 
-The test suite is designed to work in CI environments:
+### GitHub Actions
+Tests run automatically on:
+- Pull requests
+- Push to main branch
+- Scheduled runs
 
-- **Headless execution** - No display required
-- **Automatic cleanup** - Resources properly managed
-- **Consistent results** - Tests are deterministic
-- **Fast execution** - Unit tests complete quickly
+### Test Matrix
+- Python versions: 3.10, 3.11, 3.12, 3.13
+- Operating systems: Windows, macOS, Linux
+- Dependencies: All supported versions
 
-## Performance
+## Performance Testing
 
-- **Unit tests:** ~0.5 seconds
-- **Integration tests:** ~1.5 seconds
-- **Total suite:** ~2 seconds
+### Benchmark Tests
+```bash
+# Run performance benchmarks
+pytest tests/integration/ -m "benchmark"
+
+# Generate performance reports
+pytest --benchmark-only
+```
+
+### Memory Testing
+```bash
+# Run memory leak tests
+pytest tests/integration/ -m "memory"
+
+# Profile memory usage
+pytest --memray
+```
+
+## Debugging Tests
+
+### Verbose Output
+```bash
+# Maximum verbosity
+pytest -vvv
+
+# Show local variables on failure
+pytest -l
+
+# Show captured output
+pytest -s
+```
+
+### Debugging Specific Tests
+```bash
+# Run with debugger
+pytest --pdb
+
+# Stop on first failure
+pytest -x
+
+# Run only failing tests
+pytest --lf
+```
 
 ## Contributing
 
-When adding new tests:
+### Adding New Tests
+1. Place tests in appropriate subdirectory
+2. Follow naming conventions
+3. Include proper documentation
+4. Add to appropriate test categories
+5. Ensure tests pass locally
 
-1. **Follow existing patterns** for test structure and naming
-2. **Use appropriate markers** (unit/integration/slow)
-3. **Include proper cleanup** for any resources created
-4. **Add descriptive docstrings** explaining test purpose
-5. **Ensure tests are deterministic** and don't depend on external state
+### Test Maintenance
+1. Keep tests up to date with code changes
+2. Remove obsolete tests
+3. Update test data as needed
+4. Maintain test performance
+5. Review test coverage regularly
 
-## Support
+## Troubleshooting
 
-For test-related issues:
+### Common Issues
+- **Import Errors**: Check Python path and package installation
+- **Missing Dependencies**: Install test dependencies
+- **Configuration Issues**: Verify pytest configuration
+- **Environment Problems**: Check Python version and virtual environment
 
-1. Check this README for common solutions
-2. Review existing test patterns
-3. Ensure all dependencies are properly installed
-4. Run tests with verbose output for debugging
+### Getting Help
+- Check test output for error details
+- Review test configuration
+- Consult pytest documentation
+- Ask in project discussions
