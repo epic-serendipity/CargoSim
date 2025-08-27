@@ -1,6 +1,7 @@
 """Core simulation logic for CargoSim."""
 
 import copy
+import logging
 import math
 import random
 from dataclasses import dataclass, field
@@ -10,7 +11,6 @@ from typing import List, Tuple, Optional
 from .config import M, PAIR_ORDER_DEFAULT, A_PERIOD_DAYS_DFLT, B_PERIOD_DAYS_DFLT, C_PERIOD_DAYS_DFLT, D_PERIOD_DAYS_DFLT, DEFAULT_BAR_SCALE_DENOMINATORS
 from .config import SimConfig
 from ..features.smart_targeting import SmartTargeting, TargetingConfig
-from ..ui.fleet_builder import FleetComposition
 
 
 def _row_to_spoke(row: List[float]) -> SimpleNamespace:
@@ -658,18 +658,28 @@ class LogisticsSim:
 
     def build_fleet(self, label: str) -> List[Aircraft]:
         """Build fleet from label or custom fleet composition."""
+        logger = logging.getLogger(__name__)
+        
         # Use the Fleet Builder pallet as the single source of truth
         try:
-            from ..ui.fleet_builder import get_fleet_builder
+            from ..ui.fleet_builder import get_fleet_builder, FleetComposition
             fleet_builder = get_fleet_builder()
             
             # Get the current fleet from the Fleet Builder pallet
             current_fleet = fleet_builder.get_current_fleet()
-            if current_fleet:
-                # Create fleet composition from current pallet
-                fleet_composition = FleetComposition("Current Fleet", current_fleet)
-                fleet_composition.calculate_metrics(fleet_builder.config_manager.aircraft_types)
-                return self._build_fleet_from_composition(fleet_composition)
+            
+            # Validate that at least one aircraft is present
+            total_aircraft = sum(current_fleet.values()) if current_fleet else 0
+            if total_aircraft == 0:
+                # Auto-add default fleet if pallet is empty
+                logger.warning("Fleet Builder pallet is empty - auto-adding 2×C-130")
+                fleet_builder.set_aircraft_count("C-130", 2)
+                current_fleet = fleet_builder.get_current_fleet()
+            
+            # Create fleet composition from current pallet
+            fleet_composition = FleetComposition("Current Fleet", current_fleet)
+            fleet_composition.calculate_metrics(fleet_builder.config_manager.aircraft_types)
+            return self._build_fleet_from_composition(fleet_composition)
                 
         except ImportError:
             # Fallback to legacy system if fleet builder not available

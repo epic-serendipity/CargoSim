@@ -2225,6 +2225,17 @@ def validate_config(cfg: SimConfig) -> List[str]:
             if distance < 100 or distance > 1200:
                 issues.append(f"Spoke {i} distance must be between 100 and 1200 miles")
     
+    # Fleet validation - ensure Fleet Builder pallet has aircraft
+    try:
+        from ..ui.fleet_builder import get_fleet_builder
+        fleet_builder = get_fleet_builder()
+        current_fleet = fleet_builder.get_current_fleet()
+        if not current_fleet or sum(current_fleet.values()) == 0:
+            issues.append("Fleet Builder pallet is empty - add at least one aircraft")
+    except ImportError:
+        # Fleet Builder not available, skip validation
+        pass
+    
     return issues
 
 
