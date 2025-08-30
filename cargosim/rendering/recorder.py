@@ -1,13 +1,15 @@
-"""Recording functionality for CargoSim."""
+"""Recording and video export functionality for CargoSim."""
 
 import os
 import time
+import logging
 import threading
 import shutil
 from types import SimpleNamespace
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple, List
+from pathlib import Path
 
-from ..core.utils import ensure_mp4_ext, tmp_mp4_path, _mp4_available
+from cargosim.core.utils import ensure_mp4_ext, tmp_mp4_path, _mp4_available
 
 
 class Recorder:

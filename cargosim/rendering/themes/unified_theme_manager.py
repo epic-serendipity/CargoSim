@@ -1,14 +1,18 @@
-"""
-Unified Theme Manager for CargoSim.
-Integrates existing Tkinter theming with QPalette-based Qt theming.
-Provides consistent theme management across both widget systems.
-"""
+"""Unified theme management system for CargoSim."""
 
 import tkinter as tk
-from tkinter import ttk
-from typing import Optional, Dict, Any
-import sys
+from tkinter import ttk, messagebox
 import logging
+from typing import Dict, Any, Optional, List, Tuple
+from dataclasses import dataclass, field
+import json
+import os
+from pathlib import Path
+import threading
+import time
+
+# Theme configuration imports
+from cargosim.core.config import ThemeConfig, apply_theme_preset
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -24,8 +28,6 @@ except ImportError:
     QWidget = None
     QPalette = None
     QColor = None
-
-from ...core.config import ThemeConfig, apply_theme_preset
 
 
 class UnifiedThemeManager:
@@ -57,7 +59,7 @@ class UnifiedThemeManager:
             return
             
         try:
-            from .qt_theme_manager import QtThemeManager
+            from cargosim.rendering.themes.qt_theme_manager import QtThemeManager
             if self.current_theme:
                 self.qt_theme_manager = QtThemeManager(self.qt_app, self.current_theme)
         except ImportError:
@@ -448,7 +450,7 @@ class UnifiedThemeManager:
     
     def get_available_presets(self) -> list:
         """Get list of available theme presets."""
-        from ...core.config import THEME_PRESETS
+        from cargosim.core.config import THEME_PRESETS
         return list(THEME_PRESETS.keys())
     
     def export_theme(self) -> Dict[str, Any]:

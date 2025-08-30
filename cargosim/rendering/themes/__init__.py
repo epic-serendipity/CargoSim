@@ -1,24 +1,22 @@
 """
-Theme management module for CargoSim.
+Theme management and styling for CargoSim.
 
-This module contains the visual theme system, UI styling, and theme
-configuration management.
+This module provides comprehensive theming capabilities including:
+- Font management and fallbacks
+- Color palette generation
+- UI styling and customization
+- Theme presets and customization
 """
 
-from .ui_theme import apply_theme, create_palette_from_theme_config
-from .unified_theme_manager import UnifiedThemeManager
-
-# Try to import Qt theme manager, but don't fail if PyQt6 is not available
-try:
-    from .qt_theme_manager import QtThemeManager
-    QT_THEME_AVAILABLE = True
-except ImportError:
-    QtThemeManager = None
-    QT_THEME_AVAILABLE = False
+from cargosim.rendering.themes.ui_theme import apply_theme, create_palette_from_theme_config
+from cargosim.rendering.themes.unified_theme_manager import UnifiedThemeManager
+from cargosim.rendering.themes.font_manager import font_manager
+from cargosim.rendering.themes.qt_theme_manager import QtThemeManager
 
 __all__ = [
     'apply_theme',
-    'create_palette_from_theme_config',
+    'create_palette_from_theme_config', 
     'UnifiedThemeManager',
+    'font_manager',
     'QtThemeManager'
 ]

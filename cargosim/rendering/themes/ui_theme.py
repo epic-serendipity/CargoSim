@@ -1,16 +1,14 @@
-"""Comprehensive theme enforcement for Tkinter/ttk applications.
-
-This module enforces the existing color palette across the entire application,
-ensuring no widgets fall back to OS gray colors. It centralizes all theming
-in one place and removes per-widget color leaks.
-"""
+"""UI theme management and styling for CargoSim."""
 
 import tkinter as tk
 from tkinter import ttk
-from typing import Dict, Any
 import logging
+from typing import Dict, Any, Optional, Tuple
+from dataclasses import dataclass, field
+import json
+import os
 
-from ...core.utils import log_runtime_event, log_exception
+from cargosim.core.utils import log_runtime_event, log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +68,7 @@ def apply_theme(root: tk.Misc, palette: Dict[str, str]):
         
         # Apply consistent fonts using font manager
         try:
-            from .font_manager import font_manager
+            from cargosim.rendering.themes.font_manager import font_manager
             _apply_consistent_fonts(root, font_manager)
             log_runtime_event("Font manager applied successfully")
         except Exception as e:
@@ -315,7 +313,7 @@ def create_palette_from_theme_config(theme_config) -> Dict[str, str]:
 
 def _apply_consistent_fonts(root, font_manager):
     """Apply consistent fonts to all widgets using default tkinter fonts."""
-    from .default_fonts import DEFAULT_FONT, DEFAULT_FONT_BOLD
+    from cargosim.rendering.themes.default_fonts import DEFAULT_FONT, DEFAULT_FONT_BOLD
     
     def _apply_fonts_recursive(widget):
         try:

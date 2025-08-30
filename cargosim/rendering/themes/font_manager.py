@@ -1,8 +1,8 @@
-"""Centralized font management for CargoSim UI."""
+"""Font management and fallback system for CargoSim themes."""
 
 import tkinter as tk
 from typing import Dict, Tuple, Optional
-from .default_fonts import (
+from cargosim.rendering.themes.default_fonts import (
     DEFAULT_FONT, DEFAULT_FONT_BOLD, DEFAULT_FONT_ITALIC, DEFAULT_FONT_BOLD_ITALIC,
     SYSTEM_FONT, SYSTEM_FONT_BOLD, TEXT_FONT, TEXT_FONT_BOLD,
     FIXED_FONT, FIXED_FONT_BOLD, MENU_FONT, MENU_FONT_BOLD, ICON_FONT,

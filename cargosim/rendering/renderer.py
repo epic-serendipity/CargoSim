@@ -14,15 +14,15 @@ try:
 except ImportError:
     pygame = None
 
-from ..core.config import (
+from cargosim.core.config import (
     SAFE_PAD_PCT, SAFE_PAD_MIN_PX, LEFT_RAIL_PCT, LEFT_RAIL_MIN_PX,
-    RIGHT_RAIL_PCT, RIGHT_RAIL_MIN_PX, VIS_CAPS_DFLT, M,
+    RIGHT_RAIL_PCT, RIGHT_RAIL_MIN_PX, VIS_CAPS_DFLT,
     CURSOR_COLORS, hex2rgb, blend
 )
-from ..core.simulation import LogisticsSim, is_ops_capable, _row_to_spoke
-from .recorder import Recorder, NullRecorder
-from .animation_manager import TimeBasedAnimationManager
-from ..core.utils import clamp, _mp4_available, log_runtime_event, log_exception
+from cargosim.core.simulation import LogisticsSim, is_ops_capable, _row_to_spoke
+from cargosim.rendering.recorder import Recorder, NullRecorder
+from cargosim.rendering.animation_manager import TimeBasedAnimationManager
+from cargosim.core.utils import clamp, _mp4_available, log_runtime_event, log_exception
 
 # Animation constants
 ANIMATION_MIDPOINT = 0.5
@@ -132,8 +132,13 @@ SIDE_PANEL_LABEL_LIFT_FACTOR = 0.6
 
 
 @lru_cache(maxsize=128)
-def compute_spoke_positions(radius: int, center_x: int, center_y: int, spoke_count: int = M) -> List[Tuple[int, int]]:
+def compute_spoke_positions(radius: int, center_x: int, center_y: int, spoke_count: int = 10) -> List[Tuple[int, int]]:
     """Cache spoke position calculations for better performance."""
+    import logging
+    logger = logging.getLogger("cargosim.rendering.renderer")
+    
+    logger.debug(f"Computing spoke positions: radius={radius}, center=({center_x}, {center_y}), spoke_count={spoke_count}")
+    
     positions = []
     for idx in range(spoke_count):
         theta = 2 * math.pi * idx / spoke_count
@@ -141,6 +146,10 @@ def compute_spoke_positions(radius: int, center_x: int, center_y: int, spoke_cou
         y = center_y + (radius - 20) * math.sin(theta)
         # Ensure coordinates snap to integers to prevent jitter
         positions.append((int(x), int(y)))
+        
+        logger.debug(f"Spoke {idx + 1}: angle={theta:.3f} rad, position=({int(x)}, {int(y)})")
+    
+    logger.debug(f"Computed {len(positions)} spoke positions successfully")
     return positions
 
 
@@ -1059,7 +1068,7 @@ class Renderer(VizState):
     def _apply_theme(self, theme_name: Optional[str] = None):
         """Apply a theme to the renderer."""
         if theme_name:
-            from ..core.config import apply_theme_preset
+            from cargosim.core.config import apply_theme_preset
             apply_theme_preset(self.sim.cfg.theme, theme_name)
         t = self.sim.cfg.theme
         bg = hex2rgb(t.game_bg)
@@ -1140,7 +1149,19 @@ class Renderer(VizState):
         self.cx = int(self.layout.map.centerx)
         self.cy = int(self.layout.map.centery)
         self.radius = int(min(self.layout.map.width, self.layout.map.height) // 2 - self.layout.pad)
-        self.spoke_pos = compute_spoke_positions(self.radius, self.cx, self.cy, M)
+        # Get dynamic spoke count from simulation, with fallback to default
+        try:
+            if hasattr(self.sim, 'op') and self.sim.op and len(self.sim.op) > 0:
+                spoke_count = len(self.sim.op)
+            elif hasattr(self.sim, 'stock') and self.sim.stock and len(self.sim.stock) > 0:
+                spoke_count = len(self.sim.stock)
+            elif hasattr(self.sim, 'cfg') and hasattr(self.sim.cfg, 'spoke_distances') and self.sim.cfg.spoke_distances:
+                spoke_count = len(self.sim.cfg.spoke_distances)
+            else:
+                spoke_count = 10  # Default fallback
+        except (AttributeError, TypeError):
+            spoke_count = 10  # Safe fallback
+        self.spoke_pos = compute_spoke_positions(self.radius, self.cx, self.cy, spoke_count)
         for r in (self.layout.left, self.layout.right, self.layout.map):
             if r.width <= 0 or r.height <= 0:
                 raise ValueError("layout rectangle collapsed")
@@ -1149,7 +1170,7 @@ class Renderer(VizState):
         self._hud_cache = {}
 
         # Initialize spoke positions
-        self.spoke_pos = compute_spoke_positions(self.radius, self.cx, self.cy, M)
+        self.spoke_pos = compute_spoke_positions(self.radius, self.cx, self.cy, spoke_count)
         
         # Update simulation targeting positions if smart targeting is enabled
         if hasattr(self.sim, 'update_targeting_positions'):
@@ -1184,7 +1205,20 @@ class Renderer(VizState):
         assert hasattr(self, "font_big")
         assert hasattr(self, "tt")
         self.hub_text = self._text("HUB", self.font_big, self.tt.text)
-        self.spoke_text = [self._text(f"S{i+1}", self.font_small, self.tt.text) for i in range(M)]
+        # Get dynamic spoke count from simulation, with fallback to default
+        try:
+            if hasattr(self.sim, 'op') and self.sim.op and len(self.sim.op) > 0:
+                spoke_count = len(self.sim.op)
+            elif hasattr(self.sim, 'stock') and self.sim.stock and len(self.sim.stock) > 0:
+                spoke_count = len(self.sim.stock)
+            elif hasattr(self.sim, 'cfg') and hasattr(self.sim.cfg, 'spoke_distances') and self.sim.cfg.spoke_distances:
+                spoke_count = len(self.sim.cfg.spoke_distances)
+            else:
+                spoke_count = 10  # Default fallback
+        except (AttributeError, TypeError):
+            spoke_count = 10  # Safe fallback
+        
+        self.spoke_text = [self._text(f"S{i+1}", self.font_small, self.tt.text) for i in range(spoke_count)]
         self.bar_letter_surfs = [self._text(ch, self.font_small, self.tt.muted) for ch in ["A", "B", "C", "D"]]
 
     def _init_display_headless_safe(self):
@@ -1669,14 +1703,22 @@ class Renderer(VizState):
         day = period // 2
         
         # Count operational spokes
-        ops_capable = sum(1 for i in range(M) if i < len(self.sim.op) and self.sim.op[i])
-        total_spokes = M
+        try:
+            if hasattr(self.sim, 'op') and self.sim.op and len(self.sim.op) > 0:
+                total_spokes = len(self.sim.op)
+                ops_capable = sum(1 for i in range(total_spokes) if i < len(self.sim.op) and self.sim.op[i])
+            else:
+                total_spokes = 10
+                ops_capable = 0
+        except (AttributeError, TypeError):
+            total_spokes = 10
+            ops_capable = 0
         
         # Calculate daily operational cost
         daily_operational_cost = 0.0
         if hasattr(self.sim, 'fleet') and self.sim.fleet:
             try:
-                from ..ui.fleet_builder import get_aircraft_config_manager
+                from cargosim.ui.fleet_builder import get_aircraft_config_manager
                 config_manager = get_aircraft_config_manager()
                 
                 for aircraft in self.sim.fleet:
@@ -2010,7 +2052,16 @@ class Renderer(VizState):
         pygame.draw.rect(self.surface, self.tt.panel_bg, self.layout.left)
         
         # 3.1 "Operational" counter - Top-left, inside the left rail
-        ops_capable = sum(1 for i in range(M) if i < len(self.sim.op) and self.sim.op[i])
+        try:
+            if hasattr(self.sim, 'op') and self.sim.op and len(self.sim.op) > 0:
+                total_spokes = len(self.sim.op)
+                ops_capable = sum(1 for i in range(total_spokes) if i < len(self.sim.op) and self.sim.op[i])
+            else:
+                total_spokes = 10
+                ops_capable = 0
+        except (AttributeError, TypeError):
+            total_spokes = 10
+            ops_capable = 0
         ops_text = self.font_big.render(f"Operational: {ops_capable}", True, self.tt.text)
         ops_rect = ops_text.get_rect()
         ops_rect.topleft = (self.layout.left_inner.x + 10, self.layout.left_inner.y + 10)
@@ -2024,7 +2075,13 @@ class Renderer(VizState):
         # Resource letters above bars, horizontally centered
         for i, (ch, color) in enumerate(zip(["A", "B", "C", "D"], self.bar_cols)):
             # Calculate aggregate stocks across all spokes for this resource
-            total_stock = sum(self.sim.stock[s][i] if s < len(self.sim.stock) else 0 for s in range(M))
+            try:
+                if hasattr(self.sim, 'stock') and self.sim.stock and len(self.sim.stock) > 0:
+                    total_stock = sum(self.sim.stock[s][i] if s < len(self.sim.stock) else 0 for s in range(total_spokes))
+                else:
+                    total_stock = 0
+            except (AttributeError, TypeError, IndexError):
+                total_stock = 0
             
             # Position for this bar
             bar_x = self.layout.left_inner.x + 10 + i * bar_spacing

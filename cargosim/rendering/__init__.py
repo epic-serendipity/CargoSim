@@ -5,8 +5,8 @@ This module contains the pygame renderer, recording functionality, and
 visual theme management.
 """
 
-from .renderer import Renderer
-from .recorder import Recorder
+from cargosim.rendering.renderer import Renderer
+from cargosim.rendering.recorder import Recorder
 
 __all__ = [
     'Renderer',
