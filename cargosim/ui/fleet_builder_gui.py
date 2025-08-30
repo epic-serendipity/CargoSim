@@ -7,13 +7,13 @@ import json
 import math
 import logging
 
-from .fleet_builder import (
+from cargosim.ui.fleet_builder import (
     AircraftType, FleetComposition, FleetPreset, 
     AircraftConfigManager, FleetBuilder,
     get_aircraft_config_manager, get_fleet_builder
 )
 
-from ..rendering.themes.default_fonts import DEFAULT_FONT, DEFAULT_FONT_BOLD
+from cargosim.rendering.themes.default_fonts import DEFAULT_FONT, DEFAULT_FONT_BOLD
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -121,7 +121,7 @@ def create_error_dialog(parent, title: str, message: str, error_details: str = N
         header_frame.pack(fill="x", padx=20, pady=(20, 10))
         
         # Use tk.Label instead of ttk.Label for font support
-        from ..rendering.themes.font_manager import font_manager
+        from cargosim.rendering.themes.font_manager import font_manager
         tk.Label(header_frame, text="⚠️", font=font_manager.get_font('icon'), foreground="red").pack()
         tk.Label(header_frame, text=title, font=font_manager.get_font('title', 'bold'), foreground="red").pack()
         
@@ -203,14 +203,17 @@ class AircraftPalette(ttk.Frame):
         header_frame = ttk.Frame(self)
         header_frame.pack(fill="x", padx=8, pady=(8, 4))
         
-        from ..rendering.themes.font_manager import font_manager
+        from cargosim.rendering.themes.font_manager import font_manager
         ttk.Label(header_frame, text="Available Aircraft", style="Header.TLabel", 
                  font=font_manager.get_font('header', 'bold')).pack(side="left")
         
         # Refresh button
         refresh_btn = ttk.Button(header_frame, text="🔄", width=3, 
-                               command=self._refresh_aircraft_list)
+                               command=self._reload_and_refresh)
         refresh_btn.pack(side="right")
+        
+        # Add tooltip to refresh button
+        self._add_tooltip(refresh_btn, "Reload aircraft configuration and refresh list")
         
         # Aircraft list
         self.aircraft_frame = ttk.Frame(self)
@@ -313,6 +316,111 @@ class AircraftPalette(ttk.Frame):
         # Update scroll region after content changes
         self._update_scroll_region()
     
+    def reload_aircraft_config(self):
+        """Reload the aircraft configuration and refresh the display.
+        
+        This method ensures that any changes to the aircraft config file
+        are reflected in the GUI immediately.
+        """
+        try:
+            logger.info("Reloading aircraft configuration")
+            
+            # Reload the configuration in the config manager
+            if hasattr(self.config_manager, '_load_config_with_priority'):
+                self.config_manager._load_config_with_priority()
+            else:
+                # Fallback to original method
+                self.config_manager.load_config()
+            
+            # Refresh the aircraft list to show any new aircraft
+            self._refresh_aircraft_list()
+            
+            logger.info("Aircraft configuration reloaded successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to reload aircraft configuration: {e}")
+            # Show error to user
+            self._show_aircraft_list_error("Configuration Reload Failed",
+                                         f"Failed to reload aircraft configuration.\n\nError: {str(e)}")
+    
+    def _reload_and_refresh(self):
+        """Reload configuration and refresh the aircraft list.
+        
+        This method is called when the refresh button is clicked.
+        """
+        try:
+            logger.info("User requested configuration reload")
+            self.reload_aircraft_config()
+        except Exception as e:
+            logger.error(f"Error in reload and refresh: {e}")
+    
+    def _add_tooltip(self, widget, text):
+        """Add a tooltip to a widget."""
+        try:
+            # Create a local tooltip class to avoid import issues
+            class LocalTooltip:
+                """Simple tooltip widget for fleet builder."""
+                def __init__(self, widget, text: str, theme):
+                    self.widget = widget
+                    self.text = text
+                    self.theme = theme
+                    self.tip = None
+                    widget.bind("<Enter>", self.show)
+                    widget.bind("<Leave>", self.hide)
+
+                def show(self, _=None):
+                    if self.tip:
+                        return
+                    try:
+                        x = self.widget.winfo_rootx() + 20
+                        y = self.widget.winfo_rooty() + 20
+                        self.tip = tk.Toplevel(self.widget)
+                        self.tip.wm_overrideredirect(True)
+                        self.tip.wm_geometry(f"+{x}+{y}")
+                        
+                        # Get theme colors safely
+                        bg_color = getattr(theme, 'game_bg', '#2d3748')
+                        fg_color = getattr(theme, 'game_fg', '#e2e8f0')
+                        
+                        tk.Label(self.tip, text=self.text, background=bg_color,
+                                 foreground=fg_color, relief="solid", borderwidth=1,
+                                 padx=4, pady=2).pack()
+                    except Exception as e:
+                        logger.warning(f"Failed to show tooltip: {e}")
+
+                def hide(self, _=None):
+                    if self.tip:
+                        try:
+                            self.tip.destroy()
+                        except:
+                            pass
+                        self.tip = None
+            
+            # Create and return the tooltip
+            return LocalTooltip(widget, text, self._get_theme())
+        except Exception as e:
+            logger.warning(f"Could not add tooltip: {e}")
+            return None
+    
+    def _get_theme(self):
+        """Get the current theme for tooltips."""
+        try:
+            # Try to get theme from parent or use a default
+            if hasattr(self.master, '_theme_system_applied'):
+                return self.master
+            else:
+                # Return a simple theme object
+                class SimpleTheme:
+                    game_bg = "#2d3748"
+                    game_fg = "#e2e8f0"
+                return SimpleTheme()
+        except Exception:
+            # Return a simple theme object as fallback
+            class SimpleTheme:
+                game_bg = "#2d3748"
+                game_fg = "#e2e8f0"
+            return SimpleTheme()
+    
     def _update_scroll_region(self):
         """Update the scroll region to match content."""
         try:
@@ -373,7 +481,7 @@ class AircraftPalette(ttk.Frame):
         info_frame.pack(fill="x", padx=8, pady=6)
         
         # Aircraft name and description
-        from ..rendering.themes.font_manager import font_manager
+        from cargosim.rendering.themes.font_manager import font_manager
         name_label = ttk.Label(info_frame, text=aircraft_type.name, 
                               style="Header.TLabel", font=font_manager.get_font('medium', 'bold'))
         name_label.pack(anchor="w")
@@ -574,7 +682,7 @@ class FleetCanvas(ttk.Frame):
             error_frame.pack(fill="x", pady=20)
             
             # Error icon and title
-            from ..rendering.themes.font_manager import font_manager
+            from cargosim.rendering.themes.font_manager import font_manager
             ttk.Label(error_frame, text="⚠️", 
                      style="Header.TLabel", foreground="red", font=font_manager.get_font('icon')).pack()
             ttk.Label(error_frame, text=title, 
@@ -769,7 +877,7 @@ class FleetCanvas(ttk.Frame):
             error_frame.pack(expand=True, pady=20)
             
             # Error icon and title
-            from ..rendering.themes.font_manager import font_manager
+            from cargosim.rendering.themes.font_manager import font_manager
             ttk.Label(error_frame, text="⚠️", 
                      style="Header.TLabel", foreground="red", font=font_manager.get_font('icon')).pack()
             ttk.Label(error_frame, text=title, 
@@ -936,7 +1044,7 @@ class FleetCanvas(ttk.Frame):
             aircraft_name = safe_dict_get(aircraft_info, "name", "Unknown Aircraft")
             aircraft_count = safe_dict_get(aircraft_info, "count", 0)
             
-            from ..rendering.themes.font_manager import font_manager
+            from cargosim.rendering.themes.font_manager import font_manager
             ttk.Label(name_frame, text=aircraft_name, 
                      style="Header.TLabel", font=font_manager.get_font('medium', 'bold')).pack(side="left")
             ttk.Label(name_frame, text=f" × {aircraft_count}", 
@@ -1273,7 +1381,7 @@ class FleetPresetPanel(ttk.Frame):
             error_frame.pack(pady=20)
             
             # Error icon and title
-            from ..rendering.themes.font_manager import font_manager
+            from cargosim.rendering.themes.font_manager import font_manager
             ttk.Label(error_frame, text="⚠️", 
                      style="Header.TLabel", foreground="red", font=font_manager.get_font('icon')).pack()
             ttk.Label(error_frame, text=title, 
@@ -1429,7 +1537,7 @@ class FleetPresetPanel(ttk.Frame):
             info_frame.pack(fill="x", padx=8, pady=6)
             
             # Preset name - safely get
-            from ..rendering.themes.font_manager import font_manager
+            from cargosim.rendering.themes.font_manager import font_manager
             preset_name = safe_attr_get(preset, 'name', 'Unknown Preset')
             ttk.Label(info_frame, text=preset_name, 
                      style="Header.TLabel", font=font_manager.get_font('medium', 'bold')).pack(anchor="w")
@@ -1518,25 +1626,116 @@ class FleetPresetPanel(ttk.Frame):
                 pass
 
 
+class ConfigurationManager:
+    """Centralized configuration management that doesn't rely on widget hierarchy."""
+    
+    def __init__(self, main_config):
+        self.main_config = main_config
+        self.logger = logging.getLogger(__name__)
+        
+    def save_spoke_config(self, spoke_config):
+        """Save spoke configuration using direct file operations."""
+        try:
+            if not spoke_config or not isinstance(spoke_config, dict):
+                self.logger.error("Invalid spoke configuration provided")
+                return False
+                
+            # Update main configuration object
+            if 'spoke_distances' in spoke_config:
+                self.main_config.spoke_distances = spoke_config['spoke_distances']
+                self.main_config.max_spokes = spoke_config.get('max_spokes', len(spoke_config['spoke_distances']))
+                self.main_config.variable_spoke_count = spoke_config.get('variable_spoke_count', True)
+                
+                # Generate pair order
+                actual_spoke_count = len(spoke_config['spoke_distances'])
+                if actual_spoke_count > 0:
+                    pair_order = []
+                    for i in range(0, actual_spoke_count - 1, 2):
+                        if i + 1 < actual_spoke_count:
+                            pair_order.append((i, i + 1))
+                    
+                    if actual_spoke_count % 2 == 1:  # Odd number of spokes
+                        pair_order.append((actual_spoke_count - 1, 0))
+                    
+                    self.main_config.pair_order = pair_order
+                
+                # Save spoke config
+                self.main_config.spoke_config = spoke_config
+                
+                # Save to disk using the main config's save method
+                try:
+                    from cargosim.core.config import save_config
+                    save_config(self.main_config)
+                    self.logger.info("Spoke configuration saved successfully using ConfigurationManager")
+                    return True
+                except Exception as save_error:
+                    self.logger.warning(f"Could not save using save_config: {save_error}")
+                    
+                    # Fallback save
+                    return self._fallback_save(spoke_config)
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error saving spoke configuration: {e}")
+            return False
+    
+    def _fallback_save(self, spoke_config):
+        """Fallback save method using direct file I/O."""
+        try:
+            import os
+            import json
+            
+            # Try to save to user config directory
+            config_file = os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'user', 'cargo_sim_config.json')
+            os.makedirs(os.path.dirname(config_file), exist_ok=True)
+            
+            # Create minimal configuration with spoke settings
+            minimal_config = {
+                "spoke_distances": spoke_config.get('spoke_distances', []),
+                "max_spokes": spoke_config.get('max_spokes', len(spoke_config.get('spoke_distances', []))),
+                "variable_spoke_count": spoke_config.get('variable_spoke_count', True),
+                "spoke_config": spoke_config
+            }
+            
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(minimal_config, f, indent=2)
+            
+            self.logger.info("Configuration saved using fallback method")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Fallback save failed: {e}")
+            return False
+
+
 class SpokeConfigurationPanel(ttk.Frame):
     """Panel for configuring spoke distances and counts for time and distance mechanics."""
     
-    def __init__(self, parent, config_manager: AircraftConfigManager, **kwargs):
+    def __init__(self, parent, config_manager: AircraftConfigManager, configuration_manager=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.config_manager = config_manager
+        self.configuration_manager = configuration_manager  # Store ConfigurationManager reference
         self.on_config_changed: Optional[Callable[[], None]] = None
         
         # Initialize instance variables
         self.distance_vars = []
-        self.var_spoke_count = tk.BooleanVar()
+        # Always assume variable spoke count is enabled
+        self.var_spoke_count = tk.BooleanVar(value=True)
         self.spoke_count_var = tk.IntVar(value=10)
         self._preview_update_id: Optional[str] = None
+        
+        # Track pending operations for cleanup
+        self._pending_operations = set()
         
         # Theme integration
         self.theme_colors = self._get_theme_colors()
         
         self._build_ui()
         self._load_current_config()
+        
+        # Bind destroy event to clean up pending operations
+        self.bind('<Destroy>', self._on_destroy)
     
     def _get_theme_colors(self) -> dict:
         """Get current theme colors for the preview."""
@@ -1547,7 +1746,7 @@ class SpokeConfigurationPanel(ttk.Frame):
                 try:
                     if hasattr(parent, 'cfg') and hasattr(parent.cfg, 'theme'):
                         # We're in the main GUI, get theme colors
-                        from ...core.config import create_palette_from_theme_config
+                        from cargosim.core.config import create_palette_from_theme_config
                         palette = create_palette_from_theme_config(parent.cfg.theme)
                         return {
                             'bg': palette.get('bg', '#ffffff'),
@@ -1601,13 +1800,7 @@ class SpokeConfigurationPanel(ttk.Frame):
         count_frame = ttk.LabelFrame(self, text="Spoke Count", padding=8)
         count_frame.pack(fill="x", padx=8, pady=(0, 8))
         
-        # Variable spoke count toggle
-        var_check = ttk.Checkbutton(count_frame, text="Enable Variable Spoke Count", 
-                                   variable=self.var_spoke_count, 
-                                   command=self._on_variable_spoke_count_changed)
-        var_check.pack(anchor="w", pady=(0, 4))
-        
-        # Spoke count selector
+        # Spoke count selector (always enabled)
         count_selector_frame = ttk.Frame(count_frame)
         count_selector_frame.pack(fill="x", pady=(0, 4))
         
@@ -1619,6 +1812,10 @@ class SpokeConfigurationPanel(ttk.Frame):
                                               width=10,
                                               command=self._on_spoke_count_changed)
         self.spoke_count_spinner.pack(side="left", padx=(8, 0))
+        
+        # Ensure spinner is enabled (since variable spoke count is always on)
+        operation_id = self.after(100, self._update_spinner_state)
+        self._pending_operations.add(operation_id)
         
         # Spoke distances configuration
         distances_frame = ttk.LabelFrame(self, text="Spoke Distances (miles)", padding=8)
@@ -1632,7 +1829,8 @@ class SpokeConfigurationPanel(ttk.Frame):
         self._create_distance_inputs()
         
         # Force preview update after creating inputs
-        self.after(200, self._force_preview_update)
+        operation_id = self.after(200, self._force_preview_update)
+        self._pending_operations.add(operation_id)
         
         # Geographic layout preview
         preview_frame = ttk.LabelFrame(self, text="Geographic Layout Preview", padding=8)
@@ -1658,7 +1856,8 @@ class SpokeConfigurationPanel(ttk.Frame):
         self._bind_to_window_resize()
         
         # Initialize preview after UI is fully constructed
-        self.after(100, self._initialize_preview)
+        operation_id = self.after(100, self._initialize_preview)
+        self._pending_operations.add(operation_id)
     
     def _set_canvas_height(self):
         """Set canvas height based on available space."""
@@ -1720,7 +1919,8 @@ class SpokeConfigurationPanel(ttk.Frame):
                     # Significant size change, update canvas height
                     self._set_canvas_height()
                     # Redraw preview with new dimensions
-                    self.after(200, self._update_preview)
+                    operation_id = self.after(200, self._update_preview)
+                    self._pending_operations.add(operation_id)
             
             # Store current size for next comparison
             self._last_window_size = (event.width, event.height)
@@ -1733,7 +1933,8 @@ class SpokeConfigurationPanel(ttk.Frame):
             # Update canvas height when frame is resized
             self._set_canvas_height()
             # Redraw preview with new dimensions
-            self.after(100, self._update_preview)
+            operation_id = self.after(100, self._update_preview)
+            self._pending_operations.add(operation_id)
         except Exception as e:
             logger.error(f"Error handling preview frame resize: {e}")
     
@@ -1743,7 +1944,8 @@ class SpokeConfigurationPanel(ttk.Frame):
             # Update canvas height when panel is resized
             self._set_canvas_height()
             # Redraw preview with new dimensions
-            self.after(100, self._update_preview)
+            operation_id = self.after(100, self._update_preview)
+            self._pending_operations.add(operation_id)
         except Exception as e:
             logger.error(f"Error handling panel resize: {e}")
     
@@ -1755,7 +1957,8 @@ class SpokeConfigurationPanel(ttk.Frame):
                 last_width, last_height = self._last_canvas_size
                 if event.width != last_width or event.height != last_height:
                     # Size changed, update preview
-                    self.after(100, self._update_preview)
+                    operation_id = self.after(100, self._update_preview)
+                    self._pending_operations.add(operation_id)
             
             # Store current size for next comparison
             self._last_canvas_size = (event.width, event.height)
@@ -1778,99 +1981,153 @@ class SpokeConfigurationPanel(ttk.Frame):
         """Initialize the preview after UI construction."""
         try:
             # Wait for the canvas to be properly sized
-            self.after(50, self._wait_for_canvas_size)
+            operation_id = self.after(100, self._wait_for_canvas_size)
+            self._pending_operations.add(operation_id)
         except Exception as e:
             logger.error(f"Error initializing preview: {e}")
     
     def _wait_for_canvas_size(self):
         """Wait for canvas to be properly sized before drawing preview."""
         try:
-            if hasattr(self, 'preview_canvas') and self.preview_canvas:
+            # Check if the widget is being destroyed
+            if not self.winfo_exists():
+                return
+                
+            if hasattr(self, 'preview_canvas') and self.preview_canvas and self.preview_canvas.winfo_exists():
                 canvas_width = self.preview_canvas.winfo_width()
                 canvas_height = self.preview_canvas.winfo_height()
                 
                 if canvas_width > 1 and canvas_height > 1:
                     # Canvas is properly sized, draw the preview
                     self._update_preview()
+                    # Reset wait count on success
+                    if hasattr(self, '_canvas_wait_count'):
+                        self._canvas_wait_count = 0
                 else:
                     # Canvas not yet sized, wait a bit more
                     # Use exponential backoff to avoid infinite waiting
                     if not hasattr(self, '_canvas_wait_count'):
                         self._canvas_wait_count = 0
                     
-                    if self._canvas_wait_count < 10:  # Max 10 attempts
+                    if self._canvas_wait_count < 20:  # Increased max attempts further
                         self._canvas_wait_count += 1
-                        self.after(100, self._wait_for_canvas_size)
+                        # Use shorter delays for better responsiveness
+                        delay = min(30 + (self._canvas_wait_count * 8), 150)
+                        operation_id = self.after(delay, self._wait_for_canvas_size)
+                        self._pending_operations.add(operation_id)
                     else:
                         # Force update after max attempts
                         logger.warning("Canvas size wait timeout, forcing preview update")
                         self._force_preview_update()
+                        # Reset wait count after forcing update
+                        self._canvas_wait_count = 0
             else:
                 logger.warning("Preview canvas not available for initialization")
         except Exception as e:
             logger.error(f"Error waiting for canvas size: {e}")
+            # Reset wait count on error
+            if hasattr(self, '_canvas_wait_count'):
+                self._canvas_wait_count = 0
     
     def _create_distance_inputs(self):
         """Create distance input fields for each spoke."""
-        # Clear existing inputs
-        for widget in self.distances_container.winfo_children():
-            widget.destroy()
-        
-        # Clear distance variables list
-        self.distance_vars.clear()
-        
-        # Create grid for distance inputs
-        for i in range(self.spoke_count_var.get()):
-            row = i // 5  # 5 columns per row
-            col = i % 5
+        try:
+            logger.debug("Creating distance inputs for spokes")
             
-            # Spoke label
-            label = ttk.Label(self.distances_container, text=f"Spoke {i+1}:")
-            label.grid(row=row, column=col*2, padx=(0, 4), pady=2, sticky="e")
+            # Clear existing inputs
+            for widget in self.distances_container.winfo_children():
+                widget.destroy()
             
-            # Distance input
-            distance_var = tk.DoubleVar(value=500.0)
-            distance_entry = ttk.Entry(self.distances_container, 
-                                     textvariable=distance_var,
-                                     width=8,
-                                     validate="key",
-                                     validatecommand=(self.register(self._validate_distance), '%P'))
-            distance_entry.grid(row=row, column=col*2+1, padx=(0, 8), pady=2, sticky="w")
+            # Clear distance variables list
+            self.distance_vars.clear()
             
-            # Store reference to variable
-            self.distance_vars.append(distance_var)
+            # Get the current spoke count
+            spoke_count = self.spoke_count_var.get()
+            logger.debug(f"Creating distance inputs for {spoke_count} spokes")
             
-            # Bind change event using a proper method reference
-            distance_var.trace('w', self._create_distance_change_callback(i))
-        
-        # Update preview after creating inputs
-        self.after(100, self._force_preview_update)
+            # Ensure spoke count is within valid range
+            spoke_count = max(1, min(20, spoke_count))
+            
+            # Create grid for distance inputs
+            for i in range(spoke_count):
+                row = i // 5  # 5 columns per row
+                col = i % 5
+                
+                # Spoke label
+                label = ttk.Label(self.distances_container, text=f"Spoke {i+1}:")
+                label.grid(row=row, column=col*2, padx=(0, 4), pady=2, sticky="e")
+                
+                # Distance input
+                distance_var = tk.DoubleVar(value=500.0)
+                distance_entry = ttk.Entry(self.distances_container, 
+                                         textvariable=distance_var,
+                                         width=8,
+                                         validate="key",
+                                         validatecommand=(self.register(self._validate_distance), '%P'))
+                distance_entry.grid(row=row, column=col*2+1, padx=(0, 8), pady=2, sticky="w")
+                
+                # Store reference to variable
+                self.distance_vars.append(distance_var)
+                
+                # Bind change event using a proper method reference
+                distance_var.trace('w', self._create_distance_change_callback(i))
+            
+            logger.debug(f"Successfully created {spoke_count} distance input fields")
+            
+            # Update preview after creating inputs
+            operation_id = self.after(100, self._force_preview_update)
+            self._pending_operations.add(operation_id)
+            
+        except Exception as e:
+            logger.error(f"Error creating distance inputs: {e}")
+            raise
     
     def _refresh_preview_after_config(self):
         """Refresh preview after configuration changes."""
         try:
             # Force preview update after configuration changes
-            self.after(100, self._force_preview_update)
+            operation_id = self.after(100, self._force_preview_update)
+            self._pending_operations.add(operation_id)
         except Exception as e:
             logger.error(f"Error refreshing preview after config: {e}")
     
     def _force_preview_update(self):
         """Force update the preview with retry logic."""
         try:
-            if hasattr(self, 'preview_canvas') and self.preview_canvas:
+            # Check if the widget is being destroyed
+            if not self.winfo_exists():
+                return
+                
+            if hasattr(self, 'preview_canvas') and self.preview_canvas and self.preview_canvas.winfo_exists():
                 # Check if canvas is ready
                 canvas_width = self.preview_canvas.winfo_width()
                 canvas_height = self.preview_canvas.winfo_height()
                 
                 if canvas_width > 1 and canvas_height > 1:
                     self._update_preview()
+                    # Reset retry count on success
+                    if hasattr(self, '_force_update_count'):
+                        self._force_update_count = 0
                 else:
-                    # Canvas not ready, try again
-                    self.after(100, self._force_preview_update)
+                    # Canvas not ready, try again with limited retries
+                    if not hasattr(self, '_force_update_count'):
+                        self._force_update_count = 0
+                    
+                    if self._force_update_count < 8:  # Increased max retries
+                        self._force_update_count += 1
+                        delay = min(100 + (self._force_update_count * 20), 300)
+                        operation_id = self.after(delay, self._force_preview_update)
+                        self._pending_operations.add(operation_id)
+                    else:
+                        logger.warning("Force preview update retry limit reached")
+                        self._force_update_count = 0
             else:
                 logger.warning("Preview canvas not available for force update")
         except Exception as e:
             logger.error(f"Error in force preview update: {e}")
+            # Reset retry count on error
+            if hasattr(self, '_force_update_count'):
+                self._force_update_count = 0
     
     def _create_distance_change_callback(self, index):
         """Create a callback function for distance changes to avoid lambda memory leaks."""
@@ -1889,30 +2146,324 @@ class SpokeConfigurationPanel(ttk.Frame):
             return False
     
     def _on_variable_spoke_count_changed(self):
-        """Handle variable spoke count toggle change."""
+        """Handle variable spoke count toggle change (no longer used but kept for compatibility)."""
         try:
-            if self.var_spoke_count.get():
-                self.spoke_count_spinner.config(state="normal")
-            else:
-                self.spoke_count_spinner.config(state="disabled")
+            logger.info(f"Variable spoke count changed to: {self.var_spoke_count.get()}")
             
+            # Since variable spoke count is always enabled, just ensure spinner is enabled
+            self._update_spinner_state()
+            
+            # Save configuration to fleet builder if available
+            self._save_config_to_fleet_builder()
+            # Ensure configuration is saved
+            self.save_configuration_directly()
+            # Also save directly to ensure persistence
+            self.save_configuration_directly()
+            
+            # Notify configuration change
             if self.on_config_changed:
                 self.on_config_changed()
+                
+            logger.debug("Variable spoke count change processed successfully")
+                
         except Exception as e:
             logger.error(f"Error in variable spoke count change: {e}")
             self._show_spoke_config_error("Spoke Count Error", 
                                         f"Failed to update spoke count configuration.\n\nError: {str(e)}")
     
+    def _update_spinner_state(self):
+        """Update the spinner state (always enabled since variable spoke count is always on)."""
+        try:
+            # Always enable the spinner since variable spoke count is always enabled
+            self.spoke_count_spinner.config(state="normal")
+        except Exception as e:
+            logger.error(f"Error updating spinner state: {e}")
+    
+    def _on_destroy(self, event):
+        """Handle widget destruction to clean up pending operations."""
+        try:
+            # Cancel all pending operations
+            for operation_id in self._pending_operations:
+                try:
+                    self.after_cancel(operation_id)
+                except:
+                    pass
+            self._pending_operations.clear()
+            
+            logger.debug("Cleaned up pending operations on SpokeConfigurationPanel destruction")
+        except Exception as e:
+            logger.debug(f"Error during SpokeConfigurationPanel cleanup: {e}")
+    
+    
+    def save_configuration_directly(self):
+        """Save configuration directly using ConfigurationManager or fallback methods."""
+        try:
+            config = self.get_config()
+            logger.info(f"Saving configuration directly: {len(config.get('spoke_distances', []))} spokes")
+            
+            # Use ConfigurationManager if available
+            if self.configuration_manager:
+                try:
+                    success = self.configuration_manager.save_spoke_config(config)
+                    if success:
+                        logger.info("Configuration saved using ConfigurationManager")
+                        return True
+                    else:
+                        logger.warning("ConfigurationManager save failed, trying fallback methods")
+                except Exception as e:
+                    logger.warning(f"ConfigurationManager error: {e}, trying fallback methods")
+            
+            # Fallback: Try to find main GUI and update its configuration
+            parent = self.winfo_parent()
+            while parent:
+                try:
+                    if hasattr(parent, 'cfg'):
+                        # Update main configuration
+                        if 'spoke_distances' in config:
+                            parent.cfg.spoke_distances = config['spoke_distances']
+                            parent.cfg.max_spokes = config.get('max_spokes', len(config['spoke_distances']))
+                            parent.cfg.variable_spoke_count = config.get('variable_spoke_count', True)
+                            
+                            # Generate pair order
+                            actual_spoke_count = len(config['spoke_distances'])
+                            if actual_spoke_count > 0:
+                                pair_order = []
+                                for i in range(0, actual_spoke_count - 1, 2):
+                                    if i + 1 < actual_spoke_count:
+                                        pair_order.append((i, i + 1))
+                                
+                                if actual_spoke_count % 2 == 1:  # Odd number of spokes
+                                    pair_order.append((actual_spoke_count - 1, 0))
+                                
+                                parent.cfg.pair_order = pair_order
+                            
+                            # Save spoke config
+                            parent.cfg.spoke_config = config
+                            
+                            # Save to disk
+                            try:
+                                # Use absolute import - this should work from anywhere
+                                from cargosim.core.config import save_config
+                                save_config(parent.cfg)
+                                logger.info("Configuration saved successfully to disk")
+                                return True
+                            except ImportError as import_error:
+                                logger.warning(f"Could not import save_config: {import_error}")
+                                
+                                # Fallback: Save directly to JSON file
+                                try:
+                                    import os
+                                    import json
+                                    
+                                    # Get the config file path relative to the project root
+                                    current_file = os.path.abspath(__file__)
+                                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+                                    config_file = os.path.join(project_root, 'configs', 'user', 'cargo_sim_config.json')
+                                    
+                                    # Ensure directory exists
+                                    os.makedirs(os.path.dirname(config_file), exist_ok=True)
+                                    
+                                    # Save configuration
+                                    if hasattr(parent.cfg, 'to_json'):
+                                        config_data = parent.cfg.to_json()
+                                    else:
+                                        config_data = {
+                                            'spoke_distances': config.get('spoke_distances', []),
+                                            'max_spokes': config.get('max_spokes', len(config.get('spoke_distances', []))),
+                                            'variable_spoke_count': config.get('variable_spoke_count', True),
+                                            'spoke_config': config
+                                        }
+                                    
+                                    with open(config_file, 'w', encoding='utf-8') as f:
+                                        json.dump(config_data, f, indent=2)
+                                    
+                                    logger.info(f"Configuration saved to {config_file}")
+                                    return True
+                                    
+                                except Exception as fallback_error:
+                                    logger.error(f"Fallback save failed: {fallback_error}")
+                                    return False
+                        
+                        break
+                except Exception:
+                    pass
+                
+                try:
+                    parent = parent.winfo_parent()
+                except Exception:
+                    break
+            
+            logger.warning("Could not find main GUI to save configuration")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error saving configuration directly: {e}")
+            return False
+    def _save_config_to_fleet_builder(self):
+        """Save the current configuration to the fleet builder and main configuration."""
+        try:
+            # Get current configuration from the UI
+            config = self.get_config()
+            logger.info(f"SAVING CONFIGURATION: {len(config.get('spoke_distances', []))} spokes")
+            
+            # Use ConfigurationManager if available (most reliable method)
+            if self.configuration_manager:
+                try:
+                    success = self.configuration_manager.save_spoke_config(config)
+                    if success:
+                        logger.info("Configuration saved using ConfigurationManager")
+                    else:
+                        logger.warning("ConfigurationManager save failed, trying alternative methods")
+                except Exception as e:
+                    logger.warning(f"ConfigurationManager error: {e}, trying alternative methods")
+            
+            # Fallback: Always try to save directly to disk
+            success = self.save_configuration_directly()
+            if success:
+                logger.info("Configuration saved directly to disk")
+            else:
+                logger.warning("Direct save failed, trying alternative methods")
+            
+            # Also try to update the fleet builder if available
+            parent = self.winfo_parent()
+            while parent:
+                try:
+                    if hasattr(parent, 'fleet_builder') and hasattr(parent.fleet_builder, 'update_spoke_configuration'):
+                        # Update fleet builder with new configuration
+                        success = parent.fleet_builder.update_spoke_configuration(config)
+                        if success:
+                            logger.debug("Spoke configuration saved to fleet builder")
+                        else:
+                            logger.warning("Failed to save spoke configuration to fleet builder")
+                        break
+                except Exception:
+                    pass
+                
+                try:
+                    parent = parent.winfo_parent()
+                except Exception:
+                    break
+            
+            # Force a configuration reload to ensure changes take effect
+            try:
+                # Use absolute imports - these should work from anywhere
+                from cargosim.core.config import load_config, save_config
+                
+                # Reload configuration to ensure it's up to date
+                reloaded_cfg = load_config()
+                logger.info(f"Configuration reloaded: {len(reloaded_cfg.spoke_distances)} spokes")
+                
+                # If the reloaded config doesn't match what we just saved, force save it
+                if len(reloaded_cfg.spoke_distances) != len(config.get('spoke_distances', [])):
+                    logger.warning("Configuration mismatch detected, forcing save")
+                    reloaded_cfg.spoke_distances = config['spoke_distances']
+                    reloaded_cfg.max_spokes = config.get('max_spokes', len(config['spoke_distances']))
+                    reloaded_cfg.variable_spoke_count = config.get('variable_spoke_count', True)
+                    
+                    # Generate new pair order
+                    actual_spoke_count = len(config['spoke_distances'])
+                    if actual_spoke_count > 0:
+                        pair_order = []
+                        for i in range(0, actual_spoke_count - 1, 2):
+                            if i + 1 < actual_spoke_count:
+                                pair_order.append((i, i + 1))
+                        
+                        if actual_spoke_count % 2 == 1:  # Odd number of spokes
+                            pair_order.append((actual_spoke_count - 1, 0))
+                        
+                        reloaded_cfg.pair_order = pair_order
+                    
+                    reloaded_cfg.spoke_config = config
+                    save_config(reloaded_cfg)
+                    logger.info("Configuration force-saved after mismatch detection")
+                
+            except Exception as reload_error:
+                logger.warning(f"Could not reload configuration: {reload_error}")
+            
+            logger.info(f"CONFIGURATION SAVE COMPLETE: {len(config.get('spoke_distances', []))} spokes")
+            
+        except Exception as e:
+            logger.error(f"Error saving spoke configuration: {e}")
+            # Try one more time with the direct method
+            try:
+                self.save_configuration_directly()
+            except Exception as final_error:
+                logger.error(f"Final save attempt also failed: {final_error}")
+    
+    def save_configuration(self):
+        """Explicitly save the current configuration."""
+        try:
+            self._save_config_to_fleet_builder()
+            # Ensure configuration is saved
+            self.save_configuration_directly()
+            # Also save directly to ensure persistence
+            self.save_configuration_directly()
+        except Exception as e:
+            logger.error(f"Error saving configuration: {e}")
+    
     def _on_spoke_count_changed(self):
         """Handle spoke count change."""
         try:
+            # Validate the new spoke count
+            new_count = self.spoke_count_var.get()
+            logger.info(f"Spoke count changed to: {new_count}")
+            
+            if new_count < 1 or new_count > 20:
+                logger.warning(f"Invalid spoke count: {new_count}, resetting to valid range")
+                if new_count < 1:
+                    self.spoke_count_var.set(1)
+                    logger.info("Spoke count reset to minimum: 1")
+                else:
+                    self.spoke_count_var.set(20)
+                    logger.info("Spoke count reset to maximum: 20")
+                return
+            
+            logger.debug(f"Spoke count validation passed: {new_count}")
+            
+            # IMPORTANT: Update the configuration BEFORE recreating distance inputs
+            # This ensures the configuration reflects the new spoke count
+            current_config = self.get_config()
+            current_config['max_spokes'] = new_count
+            
+            # Generate new spoke distances for the new count
+            new_distances = []
+            for i in range(new_count):
+                if i < len(current_config.get('spoke_distances', [])):
+                    # Keep existing distances if available
+                    new_distances.append(current_config['spoke_distances'][i])
+                else:
+                    # Generate new distances for additional spokes
+                    new_distances.append(100 + (i * 50))
+            
+            current_config['spoke_distances'] = new_distances
+            current_config['variable_spoke_count'] = True
+            
+            # Update the configuration in the UI
+            self.spoke_count_var.set(new_count)
+            
+            # Recreate distance inputs with new count
+            logger.debug(f"Recreating distance inputs for {new_count} spokes")
             self._create_distance_inputs()
             
-            # Ensure preview is updated after spoke count change
-            self.after(150, self._force_preview_update)
+            # Update the distance variables with the new configuration
+            for i, distance in enumerate(new_distances):
+                if i < len(self.distance_vars):
+                    self.distance_vars[i].set(distance)
             
+            # Now save the updated configuration
+            logger.info(f"Saving updated configuration with {new_count} spokes")
+            self._save_config_to_fleet_builder()
+            
+            # Ensure preview is updated after spoke count change
+            operation_id = self.after(150, self._force_preview_update)
+            self._pending_operations.add(operation_id)
+            
+            # Notify configuration change
             if self.on_config_changed:
                 self.on_config_changed()
+                
+            logger.info(f"Spoke count change completed: {new_count} spokes configured and saved")
+                
         except Exception as e:
             logger.error(f"Error in spoke count change: {e}")
             self._show_spoke_config_error("Spoke Count Change Error", 
@@ -1921,11 +2472,26 @@ class SpokeConfigurationPanel(ttk.Frame):
     def _on_distance_changed(self, index):
         """Handle distance input change."""
         try:
+            # Get the new distance value
+            new_distance = self.distance_vars[index].get()
+            logger.debug(f"Distance changed for spoke {index + 1}: {new_distance} miles")
+            
             self._update_preview()
+            
+            # Save configuration to fleet builder if available
+            self._save_config_to_fleet_builder()
+            # Ensure configuration is saved
+            self.save_configuration_directly()
+            # Also save directly to ensure persistence
+            self.save_configuration_directly()
+            
             if self.on_config_changed:
                 self.on_config_changed()
+                
+            logger.debug(f"Distance change for spoke {index + 1} processed successfully")
+            
         except Exception as e:
-            logger.error(f"Error in distance change: {e}")
+            logger.error(f"Error in distance change for spoke {index + 1}: {e}")
             self._show_spoke_config_error("Distance Change Error", 
                                         f"Failed to update distance configuration.\n\nError: {str(e)}")
     
@@ -2041,15 +2607,62 @@ class SpokeConfigurationPanel(ttk.Frame):
     def _load_current_config(self):
         """Load current configuration values."""
         try:
-            # This would be populated from the actual simulation config
-            # For now, use defaults
-            self.var_spoke_count.set(False)
+            # Try to get configuration from the parent fleet builder tab
+            parent = self.winfo_parent()
+            while parent:
+                try:
+                    if hasattr(parent, 'fleet_builder') and hasattr(parent.fleet_builder, 'get_spoke_configuration'):
+                        # Load from fleet builder's stored configuration
+                        stored_config = parent.fleet_builder.get_spoke_configuration()
+                        if stored_config:
+                            self.set_config(stored_config)
+                            logger.info("Loaded spoke configuration from fleet builder")
+                            return
+                except Exception:
+                    pass
+                
+                try:
+                    parent = parent.winfo_parent()
+                except Exception:
+                    break
+            
+            # Try to get configuration from the main GUI configuration
+            parent = self.winfo_parent()
+            while parent:
+                try:
+                    if hasattr(parent, 'cfg') and hasattr(parent.cfg, 'spoke_config'):
+                        # Load from main GUI configuration
+                        main_config = parent.cfg.spoke_config
+                        if main_config:
+                            self.set_config(main_config)
+                            logger.info("Loaded spoke configuration from main GUI config")
+                            return
+                except Exception:
+                    pass
+                
+                try:
+                    parent = parent.winfo_parent()
+                except Exception:
+                    break
+            
+            # If no configuration found, use defaults
+            logger.info("No saved spoke configuration found, using defaults")
+            self.var_spoke_count.set(True)  # Always enable variable spoke count
             self.spoke_count_var.set(10)
             
+            # Ensure the spinner is in the correct state
+            self._update_spinner_state()
+            
             # Ensure preview is updated after config is loaded
-            self.after(200, self._refresh_preview_after_config)
+            operation_id = self.after(200, self._refresh_preview_after_config)
+            self._pending_operations.add(operation_id)
+            
         except Exception as e:
             logger.error(f"Error loading current config: {e}")
+            # Set defaults on error
+            self.var_spoke_count.set(True)  # Always enable variable spoke count
+            self.spoke_count_var.set(10)
+            self._update_spinner_state()
     
     def _refresh_preview_after_config(self):
         """Refresh preview after configuration is loaded."""
@@ -2066,23 +2679,40 @@ class SpokeConfigurationPanel(ttk.Frame):
             if not self.distance_vars:
                 return {}
             
-            return {
-                'variable_spoke_count': self.var_spoke_count.get(),
+            # Ensure the configuration is consistent
+            config = {
+                'variable_spoke_count': True,  # Always True since we removed the checkbox
                 'max_spokes': self.spoke_count_var.get(),
                 'spoke_distances': [var.get() for var in self.distance_vars]
             }
+            
+            # Validate spoke distances
+            if config['spoke_distances']:
+                config['spoke_distances'] = [
+                    max(100.0, min(1200.0, distance)) 
+                    for distance in config['spoke_distances']
+                ]
+            
+            return config
+            
         except Exception as e:
-            print(f"Error getting config: {e}")
-            return {}
+            logger.error(f"Error getting config: {e}")
+            # Return safe defaults on error
+            return {
+                'variable_spoke_count': True,  # Always True since we removed the checkbox
+                'max_spokes': 10,
+                'spoke_distances': [500.0] * 10
+            }
     
     def set_config(self, config: dict):
         """Set the spoke configuration from a config dict."""
         try:
-            if 'variable_spoke_count' in config:
-                self.var_spoke_count.set(config['variable_spoke_count'])
+            # Always set variable spoke count to True
+            self.var_spoke_count.set(True)
             
             if 'max_spokes' in config:
                 self.spoke_count_var.set(config['max_spokes'])
+                # Create distance inputs after setting the spoke count
                 self._create_distance_inputs()
             
             if 'spoke_distances' in config:
@@ -2092,13 +2722,26 @@ class SpokeConfigurationPanel(ttk.Frame):
                         if i < len(distances):
                             var.set(distances[i])
             
-            self._update_preview()
+            # Ensure spinner state is correct after loading config
+            self._update_spinner_state()
+            
+            # Update preview after all configuration is set
+            operation_id = self.after(100, self._update_preview)
+            self._pending_operations.add(operation_id)
+            
         except Exception as e:
             logger.error(f"Error setting config: {e}")
+            # Set defaults on error
+            self.var_spoke_count.set(True)  # Always True
+            self.spoke_count_var.set(10)
+            self._update_spinner_state()
     
     def destroy(self):
         """Clean up resources when destroying the widget."""
         try:
+            # Save configuration before destroying
+            self.save_configuration()
+            
             # Cancel any pending updates
             if self._preview_update_id:
                 try:
@@ -2154,7 +2797,7 @@ class SpokeConfigurationPanel(ttk.Frame):
             info_lines.append(f"Panel Type: {type(self).__name__}")
             
             # Check configuration state
-            info_lines.append(f"Variable Spoke Count: {self.var_spoke_count.get()}")
+            info_lines.append("Variable Spoke Count: Always Enabled (True)")
             info_lines.append(f"Spoke Count: {self.spoke_count_var.get()}")
             info_lines.append(f"Distance Variables Count: {len(self.distance_vars) if self.distance_vars else 0}")
             
@@ -2206,24 +2849,33 @@ class SpokeConfigurationPanel(ttk.Frame):
                 self.after_cancel(self._preview_update_id)
             except Exception:
                 pass
-        self._preview_update_id = self.after(delay, self._update_preview)
+        operation_id = self.after(delay, self._update_preview)
+        self._preview_update_id = operation_id
+        self._pending_operations.add(operation_id)
 
 
 class FleetBuilderTab(ttk.Frame):
     """Main fleet builder tab with aircraft palette and fleet canvas."""
     
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, configuration_manager=None, **kwargs):
         super().__init__(parent, **kwargs)
         
         # Get managers
         self.config_manager = get_aircraft_config_manager()
         self.fleet_builder = get_fleet_builder()
+        self.configuration_manager = configuration_manager  # Store ConfigurationManager reference
         
         # Callbacks
         self.on_fleet_changed: Optional[Callable[[], None]] = None
         
+        # Track pending operations
+        self._pending_operations = set()
+        
         self._build_ui()
         self._load_default_fleet()
+        
+        # Bind destroy event to clean up pending operations
+        self.bind('<Destroy>', self._on_destroy)
     
     def _build_ui(self):
         """Build the fleet builder UI."""
@@ -2240,7 +2892,7 @@ class FleetBuilderTab(ttk.Frame):
         self.aircraft_palette.pack(fill="x", pady=(0, 10))
         
         # Spoke configuration panel
-        self.spoke_config_panel = SpokeConfigurationPanel(left_panel, self.config_manager)
+        self.spoke_config_panel = SpokeConfigurationPanel(left_panel, self.config_manager, self.configuration_manager)
         self.spoke_config_panel.pack(fill="x", pady=(0, 10))
         self.spoke_config_panel.on_config_changed = self._on_spoke_config_changed
         
@@ -2532,7 +3184,50 @@ class FleetBuilderTab(ttk.Frame):
     def _load_default_fleet(self):
         """Load the default fleet configuration."""
         try:
-            # Load default fleet if available
+            # Try to load the last used fleet first
+            if hasattr(self, 'master') and hasattr(self.master, 'master'):
+                # Navigate up to find the main GUI instance
+                main_gui = self.master.master
+                while main_gui and not hasattr(main_gui, 'fleet_persistence'):
+                    main_gui = main_gui.master
+                
+                if main_gui and hasattr(main_gui, 'fleet_persistence'):
+                    try:
+                        startup_fleet = main_gui.fleet_persistence.load_last_fleet()
+                        if startup_fleet and startup_fleet.get("aircraft"):
+                            # Load the last used fleet
+                            fleet_config = {
+                                "name": startup_fleet.get("name", "Last Used Fleet"),
+                                "aircraft": startup_fleet.get("aircraft", {})
+                            }
+                            
+                            success = self.fleet_builder.load_fleet_from_config(fleet_config)
+                            if success:
+                                self.fleet_canvas._refresh_fleet_display()
+                                operation_id = self.after(100, self._update_fleet_name)
+                                self._pending_operations.add(operation_id)
+                                logger.info(f"Loaded last used fleet: {startup_fleet.get('name', 'Unknown')}")
+                                
+                                # Also try to restore spoke configuration if available
+                                self._restore_spoke_configuration()
+                                
+                                # Try to restore spoke configuration from the saved fleet data
+                                if "spoke_config" in startup_fleet and hasattr(self, 'spoke_config_panel'):
+                                    try:
+                                        self.spoke_config_panel.set_config(startup_fleet["spoke_config"])
+                                        logger.info("Restored spoke configuration from saved fleet data")
+                                    except Exception as e:
+                                        logger.warning(f"Could not restore spoke configuration from fleet data: {e}")
+                                
+                                return
+                            else:
+                                logger.warning("Failed to load last used fleet, falling back to default")
+                        else:
+                            logger.info("No last used fleet found, using default")
+                    except Exception as e:
+                        logger.warning(f"Could not load last used fleet: {e}")
+            
+            # Load default fleet if no last used fleet or if loading failed
             if hasattr(self.fleet_builder, 'get_default_fleet'):
                 default_fleet = self.fleet_builder.get_default_fleet()
                 if default_fleet:
@@ -2540,13 +3235,59 @@ class FleetBuilderTab(ttk.Frame):
                     self.fleet_canvas._refresh_fleet_display()
                     
                     # Update fleet name after loading default fleet
-                    self.after(100, self._update_fleet_name)
+                    operation_id = self.after(100, self._update_fleet_name)
+                    self._pending_operations.add(operation_id)
                     
                     logger.info(f"Loaded default fleet: {default_fleet}")
             else:
                 logger.info("Fleet builder does not have get_default_fleet method")
         except Exception as e:
             logger.error(f"Error loading default fleet: {e}")
+    
+    def _on_destroy(self, event):
+        """Handle widget destruction to clean up pending operations."""
+        try:
+            # Cancel all pending operations
+            for operation_id in self._pending_operations:
+                try:
+                    self.after_cancel(operation_id)
+                except:
+                    pass
+            self._pending_operations.clear()
+            
+            # Reset counters
+            if hasattr(self, '_canvas_wait_count'):
+                self._canvas_wait_count = 0
+            if hasattr(self, '_force_update_count'):
+                self._force_update_count = 0
+                
+            logger.debug("Cleaned up pending operations on widget destruction")
+        except Exception as e:
+            logger.debug(f"Error during cleanup: {e}")
+
+    def _restore_spoke_configuration(self):
+        """Restore spoke configuration from saved config if available."""
+        try:
+            if hasattr(self, 'master') and hasattr(self.master, 'master'):
+                # Navigate up to find the main GUI instance
+                main_gui = self.master.master
+                while main_gui and not hasattr(main_gui, 'cfg'):
+                    main_gui = main_gui.master
+                
+                if main_gui and hasattr(main_gui, 'cfg') and hasattr(main_gui.cfg, 'spoke_config'):
+                    spoke_config = main_gui.cfg.spoke_config
+                    if spoke_config and hasattr(self, 'spoke_config_panel'):
+                        # Restore to the spoke config panel
+                        self.spoke_config_panel.set_config(spoke_config)
+                        
+                        # Also sync with the main simulation configuration
+                        if 'spoke_distances' in spoke_config and hasattr(main_gui.cfg, 'spoke_distances'):
+                            main_gui.cfg.spoke_distances = spoke_config['spoke_distances']
+                            logger.info(f"Synced spoke distances with main config: {len(main_gui.cfg.spoke_distances)} spokes")
+                        
+                        logger.info("Restored spoke configuration from saved config")
+        except Exception as e:
+            logger.warning(f"Could not restore spoke configuration: {e}")
     
     def _show_load_preset_dialog(self):
         """Show dialog to load a fleet preset."""
@@ -2592,7 +3333,19 @@ class FleetBuilderTab(ttk.Frame):
                         preset_name = listbox.get(selection[0])
                         # Set fleet name from preset before loading
                         self._set_fleet_name_from_preset(preset_name)
-                        self.load_fleet_from_config(preset_name)
+                        
+                        # Load the preset using the fleet builder's method
+                        preset = self.fleet_builder.config_manager.get_fleet_preset(preset_name)
+                        if preset:
+                            self.fleet_builder.create_fleet_from_preset(preset_name)
+                            self.fleet_canvas._refresh_fleet_display()
+                            # Update fleet name after loading preset
+                            operation_id = self.after(100, self._update_fleet_name)
+                            self._pending_operations.add(operation_id)
+                        else:
+                            messagebox.showerror("Error", f"Preset '{preset_name}' not found")
+                            return
+                        
                         dialog.destroy()
                     else:
                         messagebox.showwarning("No Selection", "Please select a preset to load.")

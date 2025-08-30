@@ -150,7 +150,41 @@ class AircraftConfigManager:
         self.fleet_presets: Dict[str, FleetPreset] = {}
         self.config_version = 1
         
-        self.load_config()
+        # Use the new aircraft config loader for priority-based loading
+        self._load_config_with_priority()
+    
+    def _load_config_with_priority(self) -> None:
+        """Load aircraft configuration using the priority-based loader."""
+        try:
+            from cargosim.core.aircraft_config_loader import get_aircraft_config_loader
+            
+            # Get the aircraft config loader
+            config_loader = get_aircraft_config_loader()
+            
+            # Load configuration with priority system
+            data = config_loader.load_aircraft_config()
+            
+            # Load aircraft types
+            aircraft_data = data.get("aircraft_types", {})
+            for aircraft_id, aircraft_info in aircraft_data.items():
+                self.aircraft_types[aircraft_id] = AircraftType.from_dict(aircraft_id, aircraft_info)
+            
+            # Load fleet presets
+            presets_data = data.get("fleet_presets", {})
+            for preset_name, preset_info in presets_data.items():
+                self.fleet_presets[preset_name] = FleetPreset.from_dict(preset_name, preset_info)
+            
+            self.config_version = data.get("config_version", 1)
+            
+            # After loading, inject mandatory defaults
+            self._inject_required_defaults()
+            
+            logger.info(f"Loaded {len(self.aircraft_types)} aircraft types and {len(self.fleet_presets)} fleet presets")
+            
+        except Exception as e:
+            logger.error(f"Failed to load aircraft configuration with priority system: {e}")
+            # Fall back to the original loading method
+            self.load_config()
     
     def load_config(self) -> None:
         """Load aircraft configuration from JSON file."""
@@ -428,11 +462,49 @@ class FleetBuilder:
 
     def _load_default_fleet(self) -> None:
         """Load a default fleet composition if no temporary fleet is set."""
-        self.current_fleet = FleetComposition(
-            name="Default Fleet",
-            aircraft=self.get_default_fleet()
-        )
-        self.current_fleet.calculate_metrics(self.config_manager.aircraft_types)
+        try:
+            # Try to load the last fleet preset used
+            from cargosim.core.config import load_config
+            cfg = load_config()
+            
+            if cfg.last_fleet_preset_used:
+                # Try to load the last used preset
+                preset = self.config_manager.get_fleet_preset(cfg.last_fleet_preset_used)
+                if preset:
+                    self.current_fleet = FleetComposition(
+                        name=preset.name,
+                        aircraft=preset.aircraft.copy()
+                    )
+                    self.current_fleet.calculate_metrics(self.config_manager.aircraft_types)
+                    logger.info(f"Loaded last used fleet preset: {preset.name}")
+                    return
+                else:
+                    # Last preset no longer exists, clear the reference
+                    logger.warning(f"Last fleet preset '{cfg.last_fleet_preset_used}' no longer exists, clearing reference")
+                    try:
+                        cfg.last_fleet_preset_used = None
+                        from cargosim.core.config import save_config
+                        save_config(cfg)
+                    except Exception as e:
+                        logger.warning(f"Could not clear invalid last fleet preset reference: {e}")
+            
+            # If no last preset or it failed to load, use default (2 C-130s)
+            default_aircraft = self.get_default_fleet()
+            self.current_fleet = FleetComposition(
+                name="Default Fleet",
+                aircraft=default_aircraft
+            )
+            self.current_fleet.calculate_metrics(self.config_manager.aircraft_types)
+            logger.info("Loaded default fleet (2 C-130s)")
+            
+        except Exception as e:
+            logger.warning(f"Error loading default fleet, using fallback: {e}")
+            # Fallback to basic default
+            self.current_fleet = FleetComposition(
+                name="Default Fleet",
+                aircraft=self.get_default_fleet()
+            )
+            self.current_fleet.calculate_metrics(self.config_manager.aircraft_types)
     
     def create_fleet_from_preset(self, preset_name: str) -> FleetComposition:
         """Create a fleet composition from a preset."""
@@ -443,6 +515,10 @@ class FleetBuilder:
                 aircraft=preset.aircraft.copy()
             )
             self.current_fleet.calculate_metrics(self.config_manager.aircraft_types)
+            
+            # Update the configuration to track this preset usage
+            self._update_last_fleet_preset_used()
+            
             return self.current_fleet
         return FleetComposition("Empty Fleet", {})
     
@@ -645,6 +721,9 @@ class FleetBuilder:
             self.current_fleet = FleetComposition(fleet_name, aircraft.copy())
             self.current_fleet.calculate_metrics(self.config_manager.aircraft_types)
             
+            # Update the configuration to track this preset usage if it matches a preset
+            self._update_last_fleet_preset_used()
+            
             return True
             
         except Exception as e:
@@ -656,14 +735,20 @@ class FleetBuilder:
 
         Accepts the simple aircraft_id -> count mapping that older GUI code
         expects and adapts it to the full configuration structure required by
-        `load_fleet_from_config`.
         """
         if not aircraft_dict or not isinstance(aircraft_dict, dict):
             return False
-        return self.load_fleet_from_config({
+        
+        success = self.load_fleet_from_config({
             "name": "Loaded Fleet",
             "aircraft": aircraft_dict,
         })
+        
+        # If successful, update the configuration to track this preset usage
+        if success:
+            self._update_last_fleet_preset_used()
+        
+        return success
 
     def update_spoke_configuration(self, spoke_config: Dict[str, Any]) -> bool:
         """Update spoke configuration for the fleet."""
@@ -672,14 +757,12 @@ class FleetBuilder:
                 return False
             
             # Store spoke configuration for future use
-            # This is a placeholder - actual implementation would depend on how
-            # spoke configuration affects fleet operations
             if not hasattr(self, '_spoke_config'):
                 self._spoke_config = {}
             
             self._spoke_config = spoke_config.copy()
             
-            # For now, just log the configuration update
+            # Log the configuration update
             logger.info(f"Updated spoke configuration: {spoke_config}")
             
             return True
@@ -687,6 +770,16 @@ class FleetBuilder:
         except Exception as e:
             logger.error(f"Error updating spoke configuration: {e}")
             return False
+    
+    def get_spoke_configuration(self) -> Optional[Dict[str, Any]]:
+        """Get the current spoke configuration."""
+        try:
+            if hasattr(self, '_spoke_config') and self._spoke_config:
+                return self._spoke_config.copy()
+            return None
+        except Exception as e:
+            logger.error(f"Error getting spoke configuration: {e}")
+            return None
     
     def _generate_user_custom_name(self) -> str:
         """Generate a user custom fleet name with incrementing number."""
@@ -699,6 +792,21 @@ class FleetBuilder:
                 user_custom_count += 1
         
         return f"User Custom {user_custom_count + 1}"
+    
+    def _update_last_fleet_preset_used(self) -> None:
+        """Update the configuration to track the last fleet preset used."""
+        try:
+            # Find the matching preset name for the current fleet
+            preset_name = self._find_matching_preset()
+            if preset_name:
+                # Update the configuration
+                from cargosim.core.config import load_config, save_config
+                cfg = load_config()
+                cfg.last_fleet_preset_used = preset_name
+                save_config(cfg)
+                logger.info(f"Updated last fleet preset used: {preset_name}")
+        except Exception as e:
+            logger.warning(f"Could not update last fleet preset used: {e}")
 
 
 # Global instance for easy access

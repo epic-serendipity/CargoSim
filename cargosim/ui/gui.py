@@ -10,13 +10,13 @@ import logging
 import time
 from datetime import datetime
 
-from ..core.config import (
+from cargosim.core.config import (
     SimConfig, load_config, save_config, apply_theme_preset, 
     THEME_PRESETS, AIRFRAME_COLORSETS, CURSOR_COLORS
 )
-from ..core.utils import _mp4_available, log_runtime_event, log_exception, performance_monitor, analytics_engine, export_manager
-from ..rendering.themes.font_manager import font_manager
-from ..rendering.themes.default_fonts import DEFAULT_FONT, DEFAULT_FONT_BOLD
+from cargosim.core.utils import _mp4_available, log_runtime_event, log_exception, performance_monitor, analytics_engine, export_manager
+from cargosim.rendering.themes.font_manager import font_manager
+from cargosim.rendering.themes.default_fonts import DEFAULT_FONT, DEFAULT_FONT_BOLD
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -72,6 +72,9 @@ class ControlGUI:
             
             # Bind F11 to toggle fullscreen
             root.bind('<F11>', self._toggle_fullscreen_gui)
+            
+            # Bind window close event to save fleet
+            root.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
             log_runtime_event("Setting up GUI styles")
             self._setup_style()
@@ -95,37 +98,67 @@ class ControlGUI:
             self.tab_record = ttk.Frame(nb, padding=12, style="Card.TFrame")
             self.tab_start = ttk.Frame(nb, padding=12, style="Card.TFrame")
             self.tab_advanced = ttk.Frame(nb, padding=12, style="Card.TFrame")  # New Advanced Features tab
-
-            # Add tabs with proper spacing
-            nb.add(self.tab_fleet, text=" Fleet Builder ")
-            nb.add(self.tab_config, text=" Custom Aircraft ")
-            nb.add(self.tab_schedule, text=" Simulation Parameters ")
-            nb.add(self.tab_operations, text=" Operations ")  # New Operations tab
-            nb.add(self.tab_visual, text=" Visualization ")
-            nb.add(self.tab_gameplay, text=" Gameplay ")
-            nb.add(self.tab_theme, text=" Theme ")
-            nb.add(self.tab_record, text=" Recording ")
-            nb.add(self.tab_advanced, text=" Advanced Features ")  # New Advanced Features tab
-            nb.add(self.tab_start, text=" Save / Start ")
             
-            # Force the notebook to update its styling
-            nb.update_idletasks()
+            # Add tabs to notebook
+            nb.add(self.tab_config, text="Configuration")
+            nb.add(self.tab_fleet, text="Fleet Builder")
+            nb.add(self.tab_schedule, text="Scheduling")
+            nb.add(self.tab_operations, text="Operations")
+            nb.add(self.tab_visual, text="Visual")
+            nb.add(self.tab_gameplay, text="Gameplay")
+            nb.add(self.tab_theme, text="Theme")
+            nb.add(self.tab_record, text="Recording")
+            nb.add(self.tab_start, text="Start")
+            nb.add(self.tab_advanced, text="Advanced")
             
-            # Bind tab change events to update status bar
-            nb.bind('<<NotebookTabChanged>>', self._on_tab_changed)
+            # Initialize fleet persistence manager BEFORE building tabs
+            try:
+                from cargosim.ui.fleet_persistence import FleetPersistenceManager
+                self.fleet_persistence = FleetPersistenceManager()
+                log_runtime_event("Fleet persistence manager initialized")
+            except Exception as e:
+                log_runtime_event("Failed to initialize fleet persistence manager", f"error={e}")
+                self.fleet_persistence = None
+            
+            # Initialize ConfigurationManager
+            try:
+                from cargosim.ui.fleet_builder_gui import ConfigurationManager
+                self.configuration_manager = ConfigurationManager(self.cfg)
+                log_runtime_event("ConfigurationManager initialized")
+            except Exception as e:
+                log_runtime_event("Failed to initialize ConfigurationManager", f"error={e}")
+                self.configuration_manager = None
 
-            log_runtime_event("Building individual tab contents")
+            log_runtime_event("Building configuration tab")
             self.build_config_tab(self.tab_config)
+            
+            log_runtime_event("Building fleet builder tab")
             self.build_fleet_tab(self.tab_fleet)
+            
+            log_runtime_event("Building scheduling tab")
             self.build_schedule_tab(self.tab_schedule)
-            self.build_operations_tab(self.tab_operations)  # Build new Operations tab
+            
+            log_runtime_event("Building operations tab")
+            self.build_operations_tab(self.tab_operations)
+            
+            log_runtime_event("Building visual tab")
             self.build_visual_tab(self.tab_visual)
-            self.build_theme_tab(self.tab_theme)
+            
+            log_runtime_event("Building gameplay tab")
             self.build_gameplay_tab(self.tab_gameplay)
+            
+            log_runtime_event("Building theme tab")
+            self.build_theme_tab(self.tab_theme)
+            
+            log_runtime_event("Building recording tab")
             self.build_record_tab(self.tab_record)
-            self.build_advanced_tab(self.tab_advanced)  # Build new Advanced Features tab
+            
+            log_runtime_event("Building start tab")
             self.build_start_tab(self.tab_start)
-
+            
+            log_runtime_event("Building advanced tab")
+            self.build_advanced_tab(self.tab_advanced)
+            
             log_runtime_event("Updating dependency state and applying theme")
             # After tabs are built, apply dependency gating
             self._update_dep_state()
@@ -331,6 +364,7 @@ class ControlGUI:
             ("Range Factor", "range_factor", 0.5, 3.0, 1.0),
             ("Fuel Efficiency", "fuel_efficiency", 0.5, 2.0, 1.0),
             ("Maintenance Cost", "maintenance_cost", 0.5, 3.0, 1.0),
+            ("Speed (Mach)", "speed", 0.3, 0.8, 0.5),
         ]
         
         self.custom_vars = {}
@@ -994,7 +1028,7 @@ class ControlGUI:
             apply_theme_preset(self.cfg.theme, theme_name)
             
             # Reapply the centralized theme system
-            from ..rendering.themes.ui_theme import apply_theme, create_palette_from_theme_config
+            from cargosim.rendering.themes.ui_theme import apply_theme, create_palette_from_theme_config
             apply_theme(self.root, create_palette_from_theme_config(self.cfg.theme))
             
             # Update theme description and color swatches
@@ -1019,7 +1053,7 @@ class ControlGUI:
         """Force refresh of all UI elements to apply new theme."""
         try:
             # Reapply the centralized theme system
-            from ..rendering.themes.ui_theme import apply_theme, create_palette_from_theme_config
+            from cargosim.rendering.themes.ui_theme import apply_theme, create_palette_from_theme_config
             apply_theme(self.root, create_palette_from_theme_config(self.cfg.theme))
             
             # Force a complete redraw
@@ -1466,6 +1500,72 @@ class ControlGUI:
         if not self._read_back_to_cfg():
             return
         
+        # Save the current fleet before starting simulation
+        try:
+            if hasattr(self, 'fleet_persistence') and hasattr(self, 'fleet_builder_tab_instance'):
+                if hasattr(self.fleet_builder_tab_instance, 'fleet_builder') and self.fleet_builder_tab_instance.fleet_builder:
+                    # Get current fleet composition from fleet builder
+                    current_fleet = self.fleet_builder_tab_instance.fleet_builder.get_fleet_composition()
+                    if current_fleet and current_fleet.get("aircraft"):
+                        # Get spoke configuration if available
+                        spoke_config = None
+                        if hasattr(self.fleet_builder_tab_instance, 'spoke_config_panel'):
+                            try:
+                                spoke_config = self.fleet_builder_tab_instance.spoke_config_panel.get_config()
+                            except Exception as e:
+                                logger.warning(f"Could not get spoke configuration: {e}")
+                        
+                        # Save the current fleet and spoke configuration for next startup
+                        self.fleet_persistence.save_last_fleet(current_fleet, spoke_config)
+                        logger.info("Current fleet and spoke configuration saved before simulation start")
+                    else:
+                        logger.warning("No current fleet to save")
+                else:
+                    logger.warning("Fleet builder not available for saving fleet")
+        except Exception as e:
+            logger.warning(f"Could not save current fleet: {e}")
+        
+        # Save spoke configuration if available
+        try:
+            if hasattr(self, 'fleet_builder_tab_instance') and hasattr(self.fleet_builder_tab_instance, 'spoke_config_panel'):
+                spoke_config = self.fleet_builder_tab_instance.spoke_config_panel.get_config()
+                if spoke_config:
+                    # Save spoke configuration to the main config
+                    self.cfg.spoke_config = spoke_config
+                    
+                    # Transfer spoke configuration to main simulation config
+                    if 'spoke_distances' in spoke_config:
+                        self.cfg.spoke_distances = spoke_config['spoke_distances']
+                        logger.info(f"Spoke distances updated: {len(self.cfg.spoke_distances)} spokes")
+                    
+                    if 'max_spokes' in spoke_config:
+                        # Update the M constant if needed (this affects the simulation)
+                        from cargosim.core.config import M
+                        if spoke_config['max_spokes'] != M:
+                            logger.info(f"Spoke count changed from {M} to {spoke_config['max_spokes']}")
+                    
+                    logger.info("Spoke configuration saved and transferred to simulation config")
+        except Exception as e:
+            logger.warning(f"Could not save spoke configuration: {e}")
+        
+        # Save all GUI state variables to ensure complete configuration persistence
+        try:
+            # Save custom aircraft configuration
+            if hasattr(self, 'custom_vars') and hasattr(self, 'capability_vars'):
+                custom_config = {
+                    'capacity': self.custom_vars.get('capacity', tk.DoubleVar()).get(),
+                    'rest_periods': self.custom_vars.get('rest_periods', tk.IntVar()).get(),
+                    'range_factor': self.custom_vars.get('range_factor', tk.DoubleVar()).get(),
+                    'fuel_efficiency': self.custom_vars.get('fuel_efficiency', tk.DoubleVar()).get(),
+                    'maintenance_cost': self.custom_vars.get('maintenance_cost', tk.DoubleVar()).get(),
+                    'speed': self.custom_vars.get('speed', tk.DoubleVar()).get(),
+                    'capabilities': [cap for cap, var in self.capability_vars.items() if var.get()]
+                }
+                self.cfg.custom_aircraft_config = custom_config
+                logger.info("Custom aircraft configuration saved before simulation start")
+        except Exception as e:
+            logger.warning(f"Could not save custom aircraft configuration: {e}")
+        
         # Check pygame availability without importing
         pygame_available = False
         try:
@@ -1478,17 +1578,25 @@ class ControlGUI:
         if not pygame_available:
             messagebox.showerror("Missing Dependency", "pygame is required to run the simulation.")
             return
+        
+        # Save the complete configuration
+        try:
+            save_config(self.cfg)
+            logger.info("Complete configuration saved before simulation start")
+        except Exception as e:
+            logger.error(f"Failed to save configuration: {e}")
+            messagebox.showerror("Configuration Error", f"Failed to save configuration: {e}")
+            return
             
-        save_config(self.cfg)
         self.root.destroy()
-        from ..main import run_sim
+        from cargosim.main import run_sim
         exit_code, live_out = run_sim(self.cfg, force_windowed=self.force_windowed)
         if live_out:
             tmp = tk.Tk(); tmp.withdraw()
             # Recording saved successfully - no popup needed
             tmp.destroy()
         if exit_code == "GUI":
-            from ..main import main
+            from cargosim.main import main
             main()
 
     def _read_back_to_cfg(self) -> bool:
@@ -1500,7 +1608,7 @@ class ControlGUI:
             if hasattr(self, 'custom_vars') and hasattr(self, 'capability_vars'):
                 try:
                     # Update custom aircraft configuration in fleet builder
-                    from .fleet_builder import get_aircraft_config_manager
+                    from cargosim.ui.fleet_builder import get_aircraft_config_manager
                     config_manager = get_aircraft_config_manager()
                     
                     if "Custom_Transport" in config_manager.aircraft_types:
@@ -1512,6 +1620,7 @@ class ControlGUI:
                         custom_aircraft.range_factor = self.custom_vars["range_factor"].get()
                         custom_aircraft.fuel_efficiency = self.custom_vars["fuel_efficiency"].get()
                         custom_aircraft.maintenance_cost = self.custom_vars["maintenance_cost"].get()
+                        custom_aircraft.cruise_speed_mach = self.custom_vars["speed"].get()
                         
                         # Update special capabilities
                         custom_aircraft.special_capabilities = [
@@ -1523,6 +1632,46 @@ class ControlGUI:
                         
                 except Exception as e:
                     logger.warning(f"Could not update custom transport configuration: {e}")
+            
+            # Restore custom aircraft configuration from saved config if available
+            if hasattr(self, 'custom_vars') and hasattr(self, 'capability_vars'):
+                try:
+                    if hasattr(self.cfg, 'custom_aircraft_config'):
+                        custom_config = self.cfg.custom_aircraft_config
+                        if custom_config:
+                            # Restore custom aircraft values
+                            if 'capacity' in custom_config and 'capacity' in self.custom_vars:
+                                self.custom_vars['capacity'].set(custom_config['capacity'])
+                            if 'rest_periods' in custom_config and 'rest_periods' in self.custom_vars:
+                                self.custom_vars['rest_periods'].set(custom_config['rest_periods'])
+                            if 'range_factor' in custom_config and 'range_factor' in self.custom_vars:
+                                self.custom_vars['range_factor'].set(custom_config['range_factor'])
+                            if 'fuel_efficiency' in custom_config and 'fuel_efficiency' in self.custom_vars:
+                                self.custom_vars['fuel_efficiency'].set(custom_config['fuel_efficiency'])
+                            if 'maintenance_cost' in custom_config and 'maintenance_cost' in self.custom_vars:
+                                self.custom_vars['maintenance_cost'].set(custom_config['maintenance_cost'])
+                            if 'speed' in custom_config and 'speed' in self.custom_vars:
+                                self.custom_vars['speed'].set(custom_config['speed'])
+                            
+                            # Restore capabilities
+                            if 'capabilities' in custom_config and hasattr(self, 'capability_vars'):
+                                for capability in custom_config['capabilities']:
+                                    if capability in self.capability_vars:
+                                        self.capability_vars[capability].set(True)
+                            
+                            logger.info("Restored custom aircraft configuration from saved config")
+                except Exception as e:
+                    logger.warning(f"Could not restore custom aircraft configuration: {e}")
+            
+            # Restore spoke configuration from saved config if available
+            try:
+                if hasattr(self.cfg, 'spoke_config'):
+                    spoke_config = self.cfg.spoke_config
+                    if spoke_config and hasattr(self, 'fleet_builder_tab_instance') and hasattr(self.fleet_builder_tab_instance, 'spoke_config_panel'):
+                        self.fleet_builder_tab_instance.spoke_config_panel.set_config(spoke_config)
+                        logger.info("Restored spoke configuration from saved config")
+            except Exception as e:
+                logger.warning(f"Could not restore spoke configuration: {e}")
             
             # Simulation Parameters tab
             if hasattr(self, 'periods_var'):
@@ -1581,6 +1730,37 @@ class ControlGUI:
             messagebox.showerror("Configuration Error", f"Failed to read configuration: {e}")
             return False
 
+    def _on_window_close(self):
+        """Handle window close event - save current fleet before closing."""
+        try:
+            if hasattr(self, 'fleet_persistence') and hasattr(self, 'fleet_builder_tab_instance'):
+                if hasattr(self.fleet_builder_tab_instance, 'fleet_builder') and self.fleet_builder_tab_instance.fleet_builder:
+                    # Get current fleet composition from fleet builder
+                    current_fleet = self.fleet_builder_tab_instance.fleet_builder.get_fleet_composition()
+                    if current_fleet and current_fleet.get("aircraft"):
+                        # Get spoke configuration if available
+                        spoke_config = None
+                        if hasattr(self.fleet_builder_tab_instance, 'spoke_config_panel'):
+                            try:
+                                spoke_config = self.fleet_builder_tab_instance.spoke_config_panel.get_config()
+                            except Exception as e:
+                                logger.warning(f"Could not get spoke configuration on close: {e}")
+                        
+                        # Save the current fleet and spoke configuration for next startup
+                        self.fleet_persistence.save_last_fleet(current_fleet, spoke_config)
+                        logger.info("Current fleet and spoke configuration saved on window close")
+                    else:
+                        logger.info("No current fleet to save on window close")
+                else:
+                    logger.info("Fleet builder not available for saving fleet on close")
+            else:
+                logger.info("Fleet persistence not available for saving fleet on close")
+        except Exception as e:
+            logger.warning(f"Could not save fleet on window close: {e}")
+        
+        # Destroy the root window
+        self.root.destroy()
+
     def _apply_specific_widget_theming(self):
         """No-op - theming is handled centrally by ui_theme.py."""
         pass
@@ -1595,7 +1775,7 @@ class ControlGUI:
 
     def _reset_bar_scale_defaults(self):
         """Reset bar scale denominators to their default values."""
-        from ..core.config import DEFAULT_BAR_SCALE_DENOMINATORS
+        from cargosim.core.config import DEFAULT_BAR_SCALE_DENOMINATORS
         for i, var in enumerate(self.bar_scale_vars):
             var.set(DEFAULT_BAR_SCALE_DENOMINATORS[i])
         self._on_bar_scale_changed()
@@ -1618,7 +1798,7 @@ class ControlGUI:
             self.cfg.bar_scale.denom_D = self.bar_scale_vars[3].get()
             
             # Save to disk
-            from ..core.config import save_config
+            from cargosim.core.config import save_config
             save_config(self.cfg)
             
             messagebox.showinfo("Bar Scale Saved", "Bar scale denominators have been saved to the configuration and will persist across sessions.")
@@ -1669,7 +1849,7 @@ class ControlGUI:
         """Reset custom aircraft configuration to defaults."""
         # Reset to default values
         defaults = {"capacity": 4, "rest_periods": 8, "range_factor": 1.0, 
-                   "fuel_efficiency": 1.0, "maintenance_cost": 1.0}
+                   "fuel_efficiency": 1.0, "maintenance_cost": 1.0, "speed": 0.5}
         
         for attr, default_value in defaults.items():
             if attr in self.custom_vars:
@@ -1686,7 +1866,7 @@ class ControlGUI:
         """Save custom aircraft configuration."""
         try:
             # Update custom aircraft configuration in fleet builder
-            from .fleet_builder import get_aircraft_config_manager
+            from cargosim.ui.fleet_builder import get_aircraft_config_manager
             config_manager = get_aircraft_config_manager()
             
             if "Custom_Transport" in config_manager.aircraft_types:
@@ -1698,6 +1878,7 @@ class ControlGUI:
                 custom_aircraft.range_factor = self.custom_vars["range_factor"].get()
                 custom_aircraft.fuel_efficiency = self.custom_vars["fuel_efficiency"].get()
                 custom_aircraft.maintenance_cost = self.custom_vars["maintenance_cost"].get()
+                custom_aircraft.cruise_speed_mach = self.custom_vars["speed"].get()
                 
                 # Update special capabilities
                 custom_aircraft.special_capabilities = [
@@ -1732,7 +1913,8 @@ class ControlGUI:
                 capabilities = [cap.replace("_", " ").title() 
                               for cap, var in self.capability_vars.items() if var.get()]
                 
-                preview_text = f"Capacity: {capacity}\nRest: {rest} periods\nRange: {range_factor}x\nFuel: {fuel}x\nCost: {maintenance}x"
+                speed = self.custom_vars["speed"].get()
+                preview_text = f"Capacity: {capacity}\nRest: {rest} periods\nRange: {range_factor}x\nFuel: {fuel}x\nCost: {maintenance}x\nSpeed: {speed:.2f} Mach"
                 
                 if capabilities:
                     preview_text += f"\n\nCapabilities:\n{', '.join(capabilities)}"
@@ -1891,35 +2073,31 @@ class ControlGUI:
     def build_fleet_tab(self, tab):
         """Build the Fleet Builder tab."""
         try:
-            from .fleet_builder_gui import FleetBuilderTab
+            from cargosim.ui.fleet_builder_gui import FleetBuilderTab
+            from cargosim.ui.fleet_persistence import FleetPersistenceManager
             
             # Create the fleet builder tab
-            self.fleet_builder_tab = FleetBuilderTab(tab)
+            self.fleet_builder_tab = FleetBuilderTab(tab, self.configuration_manager)
             self.fleet_builder_tab.pack(fill="both", expand=True)
             
             # Store reference for later use
             self.fleet_builder_tab_instance = self.fleet_builder_tab
             
-            # Load the current fleet from the configuration
+            # Load the appropriate fleet on startup
             try:
-                # Convert fleet label to fleet configuration using fleet builder
                 if hasattr(self.fleet_builder_tab, 'fleet_builder') and self.fleet_builder_tab.fleet_builder:
-                    # Try to create fleet from legacy label first
-                    fleet_composition = self.fleet_builder_tab.fleet_builder.create_fleet_from_legacy_label(self.cfg.fleet_label)
-                    if fleet_composition:
-                        # Convert fleet composition to config format
-                        fleet_config = {
-                            "name": fleet_composition.name,
-                            "aircraft": fleet_composition.aircraft
-                        }
-                        self.fleet_builder_tab.load_fleet_from_config(fleet_config)
-                    else:
-                        # Fleet preset system removed - use current Fleet Builder pallet
-                        logger.info("Fleet preset system removed - using current Fleet Builder pallet")
+                    # Wait a bit for the fleet builder to fully initialize
+                    self.after(500, self._load_startup_fleet)
                 else:
                     logger.warning("Fleet builder not available for loading fleet")
             except Exception as e:
-                logger.warning(f"Could not load fleet from config: {e}")
+                logger.warning(f"Could not setup startup fleet loading: {e}")
+            
+            # Initialize custom aircraft values from aircraft configuration
+            try:
+                self._initialize_custom_aircraft_from_config()
+            except Exception as e:
+                logger.warning(f"Could not initialize custom aircraft from config: {e}")
             
         except ImportError as e:
             # Fallback if fleet builder is not available
@@ -1937,6 +2115,68 @@ class ControlGUI:
             
             ttk.Button(error_frame, text="Continue without Fleet Builder", 
                       command=lambda: tab.destroy()).pack()
+    
+    def _load_startup_fleet(self):
+        """Load the startup fleet after the fleet builder has fully initialized."""
+        try:
+            if hasattr(self, 'fleet_builder_tab') and hasattr(self.fleet_builder_tab, 'fleet_builder') and self.fleet_builder_tab.fleet_builder:
+                # Load fleet using persistence manager (last used or default)
+                startup_fleet = self.fleet_persistence.load_fleet_on_startup()
+                
+                if startup_fleet and startup_fleet.get("aircraft"):
+                    # Convert to fleet composition format
+                    fleet_config = {
+                        "name": startup_fleet["name"],
+                        "aircraft": startup_fleet["aircraft"]
+                    }
+                    
+                    # Load the fleet into the fleet builder
+                    success = self.fleet_builder_tab.load_fleet_from_config(fleet_config)
+                    
+                    if success:
+                        logger.info(f"Loaded startup fleet: {startup_fleet['name']}")
+                    else:
+                        logger.warning("Failed to load startup fleet, using empty fleet")
+                else:
+                    logger.info("No startup fleet to load, using empty fleet")
+            else:
+                logger.warning("Fleet builder not available for loading startup fleet")
+        except Exception as e:
+            logger.warning(f"Could not load startup fleet: {e}")
+
+    def _initialize_custom_aircraft_from_config(self):
+        """Initialize custom aircraft values from the aircraft configuration file."""
+        try:
+            if hasattr(self, 'custom_vars') and hasattr(self, 'capability_vars'):
+                # Get the aircraft configuration manager
+                from cargosim.ui.fleet_builder import get_aircraft_config_manager
+                config_manager = get_aircraft_config_manager()
+                
+                if "Custom_Transport" in config_manager.aircraft_types:
+                    custom_aircraft = config_manager.aircraft_types["Custom_Transport"]
+                    
+                    # Set the custom aircraft values from the configuration
+                    if 'capacity' in self.custom_vars:
+                        self.custom_vars['capacity'].set(custom_aircraft.base_capacity)
+                    if 'rest_periods' in self.custom_vars:
+                        self.custom_vars['rest_periods'].set(custom_aircraft.rest_periods)
+                    if 'range_factor' in self.custom_vars:
+                        self.custom_vars['range_factor'].set(custom_aircraft.range_factor)
+                    if 'fuel_efficiency' in self.custom_vars:
+                        self.custom_vars['fuel_efficiency'].set(custom_aircraft.fuel_efficiency)
+                    if 'maintenance_cost' in self.custom_vars:
+                        self.custom_vars['maintenance_cost'].set(custom_aircraft.maintenance_cost)
+                    if 'speed' in self.custom_vars:
+                        self.custom_vars['speed'].set(custom_aircraft.cruise_speed_mach)
+                    
+                    # Set the special capabilities
+                    for capability, var in self.capability_vars.items():
+                        var.set(capability in custom_aircraft.special_capabilities)
+                    
+                    logger.info("Custom aircraft values initialized from aircraft configuration")
+                    
+        except Exception as e:
+            logger.warning(f"Could not initialize custom aircraft from config: {e}")
 
     def _toggle_simulation_pause(self):
         """Toggle simulation pause/resume state."""
@@ -2343,7 +2583,7 @@ class ControlGUI:
                     self._recursive_font_apply(widget, small_font, normal_font, header_font)
                     
         except Exception as e:
-            from ..core.utils import log_exception
+            from cargosim.core.utils import log_exception
             log_exception(e, "Error applying fonts to elements")
     
     def _recursive_font_apply(self, parent, small_font, normal_font, header_font):
@@ -2386,7 +2626,7 @@ class ControlGUI:
                     self._recursive_font_apply(child, small_font, normal_font, header_font)
                     
         except Exception as e:
-            from ..core.utils import log_exception
+            from cargosim.core.utils import log_exception
             log_exception(e, "Error in recursive font application")
     
     def _handle_screen_resize(self, event=None):
@@ -2399,7 +2639,7 @@ class ControlGUI:
             self._resize_timer = self.root.after(100, self._handle_responsive_layout)
             
         except Exception as e:
-            from ..core.utils import log_exception
+            from cargosim.core.utils import log_exception
             log_exception(e, "Error handling screen resize")
     
     def _setup_responsive_bindings(self):
@@ -2412,7 +2652,7 @@ class ControlGUI:
             self.root.bind('<F11>', self._toggle_fullscreen_gui)
             
         except Exception as e:
-            from ..core.utils import log_exception
+            from cargosim.core.utils import log_exception
             log_exception(e, "Error setting up responsive bindings")
 
     def build_advanced_tab(self, tab):
@@ -2686,7 +2926,7 @@ class ControlGUI:
     def _apply_font_scale(self):
         """Apply font scaling changes."""
         try:
-            from ..rendering.themes.font_manager import font_manager
+            from cargosim.rendering.themes.font_manager import font_manager
             scale = self.font_scale_var.get()
             font_manager.set_scale(scale)
             
@@ -2835,7 +3075,7 @@ class ControlGUI:
     def _setup_performance_monitoring(self):
         """Setup performance monitoring integration."""
         try:
-            from ..core.utils import performance_monitor, analytics_engine
+            from cargosim.core.utils import performance_monitor, analytics_engine
             
             # Initialize performance monitoring
             self.performance_monitor = performance_monitor
@@ -2898,17 +3138,31 @@ class ControlGUI:
         if not hasattr(self, 'performance_monitor') or not self.performance_monitor:
             return
         
+        # Check if the application is being destroyed
+        try:
+            if hasattr(self, 'root') and self.root and not self.root.winfo_exists():
+                return
+        except tk.TclError:
+            # Application is being destroyed
+            return
+        
         try:
             # Get current performance summary
             summary = self.performance_monitor.get_performance_summary()
             
-            # Update status bar with performance info
-            if hasattr(self, 'status_bar'):
-                perf_text = f"CPU: {summary['current_metrics'].get('cpu_usage', 0):.1f}% | "
-                perf_text += f"Memory: {summary['current_metrics'].get('memory_usage', 0):.0f}MB | "
-                perf_text += f"Uptime: {summary['uptime_hours']:.1f}h"
-                
-                self.performance_status_label.configure(text=perf_text)
+            # Update status bar with performance info - check if widgets still exist
+            if hasattr(self, 'status_bar') and self.status_bar and self.status_bar.winfo_exists():
+                if hasattr(self, 'performance_status_label') and self.performance_status_label and self.performance_status_label.winfo_exists():
+                    try:
+                        perf_text = f"CPU: {summary['current_metrics'].get('cpu_usage', 0):.1f}% | "
+                        perf_text += f"Memory: {summary['current_metrics'].get('memory_usage', 0):.0f}MB | "
+                        perf_text += f"Uptime: {summary['uptime_hours']:.1f}h"
+                        
+                        self.performance_status_label.configure(text=perf_text)
+                    except tk.TclError as e:
+                        # Widget may have been destroyed, log and continue
+                        logger.debug(f"Performance status label update failed (widget may be destroyed): {e}")
+                        return
             
             # Update performance metrics in advanced tab if visible
             if hasattr(self, 'performance_metrics_display'):
@@ -2923,29 +3177,44 @@ class ControlGUI:
             return
         
         try:
-            # Update metrics labels
+            # Update metrics labels - check if widgets still exist
             for metric_name, value in summary['current_metrics'].items():
                 if metric_name in self.performance_metrics_display:
                     label = self.performance_metrics_display[metric_name]
-                    if isinstance(value, float):
-                        label.configure(text=f"{metric_name.replace('_', ' ').title()}: {value:.2f}")
-                    else:
-                        label.configure(text=f"{metric_name.replace('_', ' ').title()}: {value}")
+                    if label and label.winfo_exists():
+                        try:
+                            if isinstance(value, float):
+                                label.configure(text=f"{metric_name.replace('_', ' ').title()}: {value:.2f}")
+                            else:
+                                label.configure(text=f"{metric_name.replace('_', ' ').title()}: {value}")
+                        except tk.TclError as e:
+                            logger.debug(f"Failed to update metric {metric_name} (widget may be destroyed): {e}")
+                            continue
             
             # Update uptime
             if 'uptime_label' in self.performance_metrics_display:
-                self.performance_metrics_display['uptime_label'].configure(
-                    text=f"Uptime: {summary['uptime_hours']:.1f} hours"
-                )
+                uptime_label = self.performance_metrics_display['uptime_label']
+                if uptime_label and uptime_label.winfo_exists():
+                    try:
+                        uptime_label.configure(
+                            text=f"Uptime: {summary['uptime_hours']:.1f} hours"
+                        )
+                    except tk.TclError as e:
+                        logger.debug(f"Failed to update uptime label (widget may be destroyed): {e}")
             
             # Update alert count
             if 'alerts_label' in self.performance_metrics_display:
-                alert_count = summary['total_alerts']
-                alert_color = "red" if alert_count > 0 else "green"
-                self.performance_metrics_display['alerts_label'].configure(
-                    text=f"Alerts: {alert_count}",
-                    foreground=alert_color
-                )
+                alerts_label = self.performance_metrics_display['alerts_label']
+                if alerts_label and alerts_label.winfo_exists():
+                    try:
+                        alert_count = summary['total_alerts']
+                        alert_color = "red" if alert_count > 0 else "green"
+                        alerts_label.configure(
+                            text=f"Alerts: {alert_count}",
+                            foreground=alert_color
+                        )
+                    except tk.TclError as e:
+                        logger.debug(f"Failed to update alerts label (widget may be destroyed): {e}")
                 
         except Exception as e:
             log_exception(e, "Performance metrics display update failed")
@@ -2953,7 +3222,7 @@ class ControlGUI:
     def _setup_analytics_integration(self):
         """Setup analytics engine integration."""
         try:
-            from ..core.utils import analytics_engine
+            from cargosim.core.utils import analytics_engine
             
             # Initialize analytics
             self.analytics_engine = analytics_engine
@@ -3288,7 +3557,7 @@ class ControlGUI:
     def _setup_export_integration(self):
         """Setup export manager integration."""
         try:
-            from ..core.utils import export_manager
+            from cargosim.core.utils import export_manager
             
             # Initialize export manager
             self.export_manager = export_manager
@@ -3567,7 +3836,7 @@ class ControlGUI:
     def _show_help_system(self):
         """Show the comprehensive help system."""
         try:
-            from .help_system import HelpSystem
+            from cargosim.ui.help_system import HelpSystem
             
             if not hasattr(self, 'help_system'):
                 self.help_system = HelpSystem(self.root)

@@ -7,8 +7,8 @@ from tkinter import ttk, messagebox, filedialog
 import webbrowser
 from typing import Optional
 
-from ..core.utils import log_runtime_event, log_exception
-from ..rendering.themes.default_fonts import DEFAULT_FONT_BOLD
+from cargosim.core.utils import log_runtime_event, log_exception
+from cargosim.rendering.themes.default_fonts import DEFAULT_FONT_BOLD
 
 
 class HelpSystem:
