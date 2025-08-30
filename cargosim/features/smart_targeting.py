@@ -11,7 +11,7 @@ import math
 import random
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict, Set
-from ..core.config import M
+
 
 
 @dataclass
@@ -67,13 +67,17 @@ class SmartTargeting:
         self.spoke_positions: List[Tuple[int, int]] = []
         self.hub_position: Tuple[int, int] = (0, 0)
         self.distance_matrix: Dict[Tuple[str, int], float] = {}
-        self.recent_service_count: List[int] = [0] * M
+        self.recent_service_count: List[int] = []  # Will be updated when positions are initialized
         self.period_reservations: Set[int] = set()  # Spokes reserved this period
         
     def initialize_positions(self, hub_pos: Tuple[int, int], spoke_positions: List[Tuple[int, int]]):
         """Initialize hub and spoke positions, compute distance matrix."""
         self.hub_position = hub_pos
         self.spoke_positions = spoke_positions
+        
+        # Update recent service count to match actual spoke count
+        self.recent_service_count = [0] * len(spoke_positions)
+        
         self._compute_distance_matrix()
         
     def _compute_distance_matrix(self):
@@ -87,8 +91,9 @@ class SmartTargeting:
             self.distance_matrix[(i, "HUB")] = dist
             
         # Spoke to spoke distances
-        for i in range(M):
-            for j in range(i + 1, M):
+        spoke_count = len(self.spoke_positions)
+        for i in range(spoke_count):
+            for j in range(i + 1, spoke_count):
                 dist = self._euclidean_distance(self.spoke_positions[i], self.spoke_positions[j])
                 self.distance_matrix[(i, j)] = dist
                 self.distance_matrix[(j, i)] = dist
@@ -108,20 +113,46 @@ class SmartTargeting:
     
     def _get_distance(self, from_loc: str | int, to_spoke: int) -> float:
         """Get distance from a location to a spoke."""
-        if from_loc == "HUB":
-            return self.distance_matrix[("HUB", to_spoke)]
-        else:
-            # from_loc should be a spoke index (either string or int)
-            from_spoke = int(from_loc) if isinstance(from_loc, str) else from_loc
-            if from_spoke == to_spoke:
-                return 0.0  # Same spoke
-            return self.distance_matrix[(from_spoke, to_spoke)]
+        try:
+            if from_loc == "HUB":
+                if ("HUB", to_spoke) not in self.distance_matrix:
+                    # Fallback: calculate distance on the fly if matrix is incomplete
+                    if to_spoke < len(self.spoke_positions):
+                        return self._euclidean_distance(self.hub_position, self.spoke_positions[to_spoke])
+                    else:
+                        return 1000.0  # Large fallback distance for invalid spoke
+                return self.distance_matrix[("HUB", to_spoke)]
+            else:
+                # from_loc should be a spoke index (either string or int)
+                from_spoke = int(from_loc) if isinstance(from_loc, str) else from_loc
+                if from_spoke == to_spoke:
+                    return 0.0  # Same spoke
+                if (from_spoke, to_spoke) not in self.distance_matrix:
+                    # Fallback: calculate distance on the fly if matrix is incomplete
+                    if (from_spoke < len(self.spoke_positions) and to_spoke < len(self.spoke_positions)):
+                        return self._euclidean_distance(self.spoke_positions[from_spoke], self.spoke_positions[to_spoke])
+                    else:
+                        return 1000.0  # Large fallback distance for invalid spoke
+                return self.distance_matrix[(from_spoke, to_spoke)]
+        except (KeyError, IndexError, AttributeError):
+            # Comprehensive fallback for any error
+            return 1000.0
     
     def compute_spoke_benefits(self, stock: List[List[float]], stage: str) -> List[SpokeBenefit]:
         """Compute benefit signals for all spokes."""
         benefits = []
         
-        for i in range(M):
+        spoke_count = len(self.spoke_positions)
+        for i in range(spoke_count):
+            # Safety check: ensure stock array has enough elements
+            if i >= len(stock) or len(stock[i]) < 4:
+                # Create default benefit for missing stock data
+                benefits.append(SpokeBenefit(
+                    need_score=0.5,
+                    ops_gain_score=0.5,
+                    marginal_benefit=0.5
+                ))
+                continue
             # Resource deficits
             deficit_A = max(0, 1 - stock[i][0])
             deficit_B = max(0, 1 - stock[i][1])
@@ -195,7 +226,18 @@ class SmartTargeting:
         """Compute cost signals for all spokes from an aircraft's perspective."""
         costs = []
         
-        for i in range(M):
+        spoke_count = len(self.spoke_positions)
+        for i in range(spoke_count):
+            # Safety check: ensure we have valid data
+            if i >= len(stock) or len(stock[i]) < 4:
+                # Create default cost for missing stock data
+                costs.append(SpokeCost(
+                    distance_norm=1.0,
+                    congestion_penalty=0.0,
+                    fairness_penalty=0.0
+                ))
+                continue
+                
             # Distance penalty
             distance = self._get_distance(aircraft_location, i)
             distance_norm = distance / self.config.distance_normalizer
@@ -301,7 +343,8 @@ class SmartTargeting:
         
         # Score all feasible spokes
         leg_scores = []
-        for i in range(M):
+        spoke_count = len(self.spoke_positions)
+        for i in range(spoke_count):
             if i in exclude_spokes:
                 continue
                 
@@ -339,7 +382,8 @@ class SmartTargeting:
         
     def reset_recent_service(self):
         """Reset recent service tracking for a new simulation."""
-        self.recent_service_count = [0] * M
+        spoke_count = len(self.spoke_positions) if self.spoke_positions else 10
+        self.recent_service_count = [0] * spoke_count
         self.period_reservations.clear()
         
     def clear_period_reservations(self):
@@ -352,7 +396,8 @@ class SmartTargeting:
         
     def decay_recent_service(self):
         """Decay recent service counts (call at end of period)."""
-        for i in range(M):
+        spoke_count = len(self.recent_service_count)
+        for i in range(spoke_count):
             self.recent_service_count[i] = max(0, 
                 int(self.recent_service_count[i] * self.config.fairness_decay))
     
@@ -380,7 +425,8 @@ class SmartTargeting:
             "spoke_details": []
         }
         
-        for i in range(M):
+        spoke_count = len(self.spoke_positions)
+        for i in range(spoke_count):
             spoke_info = {
                 "spoke_idx": i,
                 "stock": stock[i],
