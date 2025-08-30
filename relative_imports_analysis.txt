@@ -1,0 +1,71 @@
+================================================================================
+CARGOSIM RELATIVE IMPORT ANALYSIS REPORT
+================================================================================
+
+TOTAL RELATIVE IMPORTS FOUND: 46
+Simple (single-dot): 44
+Medium (double-dot): 2
+Complex (triple-dot): 0
+
+SIMPLE IMPORTS (from .module import ...)
+--------------------------------------------------
+cargosim\__main__.py:5 - from .main import main as gui_main, load_config, LogisticsSim
+cargosim\core\config.py:11 - from .paths import USER_MAIN_CONFIG_FILE, MAIN_CONFIG_FILE
+cargosim\core\configuration_manager.py:20 - from .config import SimConfig, load_config, save_config
+cargosim\core\configuration_manager.py:21 - from .paths import get_config_dir, get_user_config_dir
+cargosim\core\config_migration.py:16 - from .paths import USER_MAIN_CONFIG_FILE, USER_CONFIGS_DIR, DEFAULT_CONFIGS_DIR
+cargosim\core\config_migration.py:17 - from .config import CONFIG_VERSION, SimConfig, ThemeConfig
+cargosim\core\error_handler.py:20 - from .utils import get_logger, log_runtime_event, log_exception
+cargosim\core\logging_config.py:21 - from .paths import DEBUG_LOG_FILE, RUNTIME_LOG_FILE
+cargosim\core\simulation.py:11 - from .config import M, PAIR_ORDER_DEFAULT, A_PERIOD_DAYS_DFLT, B_PERIOD_DAYS_DFLT, C_PERIOD_DAYS_DFLT, D_PERIOD_DAYS_DFLT, DEFAULT_BAR_SCALE_DENOMINATORS
+cargosim\core\simulation.py:12 - from .config import SimConfig
+cargosim\core\simulation.py:1747 - from .utils import append_debug
+cargosim\core\simulation.py:1845 - from .utils import append_debug
+cargosim\core\utils.py:15 - from .paths import DEBUG_LOG_FILE, RUNTIME_LOG_FILE
+cargosim\core\utils.py:25 - from .logging_config import setup_comprehensive_logging
+cargosim\core\utils.py:37 - from .logging_config import get_logger
+cargosim\core\utils.py:1114 - from .logging_config import get_logger as get_comprehensive_logger
+cargosim\core\utils.py:1172 - from .paths import USER_CONFIGS_DIR, DEFAULT_CONFIGS_DIR
+cargosim\core\__init__.py:8 - from .simulation import LogisticsSim
+cargosim\core\__init__.py:9 - from .config import SimConfig, validate_config
+cargosim\core\__init__.py:10 - from .utils import setup_logging, get_logger
+cargosim\features\__init__.py:8 - from .smart_targeting import SmartTargeting
+cargosim\rendering\renderer.py:23 - from .recorder import Recorder, NullRecorder
+cargosim\rendering\renderer.py:24 - from .animation_manager import TimeBasedAnimationManager
+cargosim\rendering\__init__.py:8 - from .renderer import Renderer
+cargosim\rendering\__init__.py:9 - from .recorder import Recorder
+cargosim\rendering\themes\font_manager.py:5 - from .default_fonts import (
+cargosim\rendering\themes\ui_theme.py:73 - from .font_manager import font_manager
+cargosim\rendering\themes\ui_theme.py:318 - from .default_fonts import DEFAULT_FONT, DEFAULT_FONT_BOLD
+cargosim\rendering\themes\unified_theme_manager.py:60 - from .qt_theme_manager import QtThemeManager
+cargosim\rendering\themes\__init__.py:8 - from .ui_theme import apply_theme, create_palette_from_theme_config
+cargosim\rendering\themes\__init__.py:9 - from .unified_theme_manager import UnifiedThemeManager
+cargosim\rendering\themes\__init__.py:13 - from .qt_theme_manager import QtThemeManager
+cargosim\ui\fleet_builder_gui.py:10 - from .fleet_builder import (
+cargosim\ui\gui.py:116 - from .fleet_persistence import FleetPersistenceManager
+cargosim\ui\gui.py:125 - from .fleet_builder_gui import ConfigurationManager
+cargosim\ui\gui.py:1611 - from .fleet_builder import get_aircraft_config_manager
+cargosim\ui\gui.py:1869 - from .fleet_builder import get_aircraft_config_manager
+cargosim\ui\gui.py:2076 - from .fleet_builder_gui import FleetBuilderTab
+cargosim\ui\gui.py:2077 - from .fleet_persistence import FleetPersistenceManager
+cargosim\ui\gui.py:2152 - from .fleet_builder import get_aircraft_config_manager
+cargosim\ui\gui.py:3839 - from .help_system import HelpSystem
+cargosim\ui\__init__.py:8 - from .gui import ControlGUI
+cargosim\ui\__init__.py:9 - from .fleet_builder import FleetBuilder
+cargosim\ui\__init__.py:10 - from .fleet_builder_gui import FleetBuilderTab
+
+MEDIUM IMPORTS (from ..module import ...)
+--------------------------------------------------
+cargosim\ui\gui.py:1592 - from ..main import run_sim
+cargosim\ui\gui.py:1599 - from ..main import main
+
+CONVERSION RECOMMENDATIONS
+--------------------------------------------------
+1. Simple imports: Change 'from .module' to 'from cargosim.module'
+2. Medium imports: Change 'from ..module' to 'from cargosim.module'
+3. Complex imports: Change 'from ...module' to 'from cargosim.module'
+
+Priority order:
+- Phase 1: Fix complex imports (most error-prone)
+- Phase 2: Fix medium imports
+- Phase 3: Fix simple imports
