@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from functools import lru_cache
 
 # Debug logging
-from .paths import DEBUG_LOG_FILE, RUNTIME_LOG_FILE
+from cargosim.core.paths import DEBUG_LOG_FILE, RUNTIME_LOG_FILE
 DEBUG_LOG = str(DEBUG_LOG_FILE)
 # Runtime logging for execution tracking
 RUNTIME_LOG = str(RUNTIME_LOG_FILE)
@@ -22,37 +22,20 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None,
                   console: bool = True) -> logging.Logger:
     """Setup logging configuration for CargoSim."""
     # Use the new comprehensive logging system
-    from .logging_config import setup_comprehensive_logging
+    from cargosim.core.logging_config import setup_comprehensive_logging
     log_manager = setup_comprehensive_logging(level, log_file, console)
     return log_manager.get_logger("cargosim")
 
 
 def setup_runtime_logging() -> logging.Logger:
-    """Setup specialized runtime logging for execution tracking."""
-    runtime_logger = logging.getLogger("cargosim.runtime")
-    runtime_logger.setLevel(logging.DEBUG)
+    """Setup specialized runtime logging for execution tracking.
     
-    # Clear existing handlers
-    runtime_logger.handlers.clear()
-    
-    # Create detailed formatter for runtime
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
-    )
-    
-    # File handler for runtime log
-    file_handler = logging.FileHandler(RUNTIME_LOG, encoding="utf-8", mode="w")
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.DEBUG)
-    runtime_logger.addHandler(file_handler)
-    
-    # Console handler for runtime (INFO level only)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.INFO)
-    runtime_logger.addHandler(console_handler)
-    
-    return runtime_logger
+    Note: This function is deprecated in favor of the comprehensive logging system.
+    The runtime logger is now managed by the LogManager in logging_config.py.
+    """
+    # Use the comprehensive logging system instead
+    from cargosim.core.logging_config import get_logger
+    return get_logger("cargosim.runtime")
 
 
 def log_runtime_event(event: str, details: str = "", level: str = "INFO"):
@@ -1128,7 +1111,7 @@ export_manager = ExportManager()
 def get_logger(name: str = "cargosim") -> logging.Logger:
     """Get a logger instance."""
     # Use the new comprehensive logging system
-    from .logging_config import get_logger as get_comprehensive_logger
+    from cargosim.core.logging_config import get_logger as get_comprehensive_logger
     return get_comprehensive_logger(name)
 
 
@@ -1186,7 +1169,7 @@ from shutil import rmtree
 
 def reset_user_configs() -> None:
     """Delete all user-generated configuration files and related metadata."""
-    from .paths import USER_CONFIGS_DIR, DEFAULT_CONFIGS_DIR
+    from cargosim.core.paths import USER_CONFIGS_DIR, DEFAULT_CONFIGS_DIR
     import shutil, glob
     try:
         # Purge user directory completely

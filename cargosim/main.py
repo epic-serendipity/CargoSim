@@ -7,14 +7,14 @@ import tkinter as tk
 from tkinter import messagebox
 import argparse
 
-from .core.config import SimConfig, load_config, save_config, validate_config
-from .core.simulation import LogisticsSim
-from .rendering.renderer import Renderer
-from .ui.gui import ControlGUI
-from .core.utils import setup_logging, get_logger, setup_runtime_logging, log_runtime_event, log_exception
-from .core.error_handler import get_error_handler, handle_error, error_handler_decorator
-from .core.font_error_suppressor import get_font_limiter, install_font_error_limiting
-from .core.stderr_filter import install_stderr_limiter, get_stderr_limiter
+from cargosim.core.config import SimConfig, load_config, save_config, validate_config
+from cargosim.core.simulation import LogisticsSim
+from cargosim.rendering.renderer import Renderer
+from cargosim.ui.gui import ControlGUI
+from cargosim.core.utils import setup_logging, get_logger, setup_runtime_logging, log_runtime_event, log_exception
+from cargosim.core.error_handler import get_error_handler, handle_error, error_handler_decorator
+from cargosim.core.font_error_suppressor import get_font_limiter, install_font_error_limiting
+from cargosim.core.stderr_filter import install_stderr_limiter, get_stderr_limiter
 
 
 def _pip_install(pkgs: list[str]) -> bool:
@@ -87,7 +87,7 @@ def check_and_offer_installs(startup_root: tk.Tk):
     
     # Optional: imageio & imageio-ffmpeg
     log_runtime_event("Checking MP4 recording dependencies")
-    from .core.utils import _mp4_available
+    from cargosim.core.utils import _mp4_available
     if not _mp4_available()[0]:
         logger.warning("MP4 recording not available")
         log_runtime_event("MP4 recording not available")
@@ -321,7 +321,7 @@ def render_offline(cfg: SimConfig):
             self.clock = None
 
             # Initialize remaining attributes
-            from .core.config import CURSOR_COLORS, hex2rgb
+            from cargosim.core.config import CURSOR_COLORS, hex2rgb
             self.cursor_col = hex2rgb(CURSOR_COLORS.get(self.sim.cfg.cursor_color, CURSOR_COLORS["Cobalt"]))
             self.ac_colors = {k: hex2rgb(v) for k, v in self.sim.cfg.theme.ac_colors.items()}
             self.bar_cols = [self.tt.bar_A, self.tt.bar_B, self.tt.bar_C, self.tt.bar_D]
@@ -346,14 +346,14 @@ def render_offline(cfg: SimConfig):
     frames_per_period = max(1, rc.frames_per_period)
 
     fmt = rc.offline_fmt
-    from .core.utils import _mp4_available
+    from cargosim.core.utils import _mp4_available
     ok, _ = _mp4_available()
     if fmt == "mp4" and not ok:
         logger.warning("MP4 rendering requires imageio-ffmpeg; writing PNG frames instead.")
         fmt = "png"
     ext = ".mp4" if fmt == "mp4" else ".png"
     out_file = rc.offline_output_path or os.path.join(os.getcwd(), f"offline_render{ext}")
-    from .rendering.recorder import Recorder
+    from cargosim.rendering.recorder import Recorder
     recorder = Recorder.for_offline(file_path=out_file, fps=rc.offline_fps, fmt=fmt)
 
     try:
@@ -377,10 +377,10 @@ def render_offline(cfg: SimConfig):
 def theme_sweep(out_dir: str = "_theme_sweep"):
     """Generate theme preview images."""
     os.makedirs(out_dir, exist_ok=True)
-    from .core.config import THEME_PRESETS, AIRFRAME_COLORSETS
+    from cargosim.core.config import THEME_PRESETS, AIRFRAME_COLORSETS
     for name in THEME_PRESETS.keys():
         cfg = SimConfig()
-        from .core.config import apply_theme_preset
+        from cargosim.core.config import apply_theme_preset
         apply_theme_preset(cfg.theme, name)
         if cfg.theme.ac_colorset:
             cfg.theme.ac_colors = AIRFRAME_COLORSETS[cfg.theme.ac_colorset]
@@ -398,7 +398,7 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
                 return c/12.92 if c <= 0.03928 else ((c+0.055)/1.055) ** 2.4
             r,g,b = [chan(x) for x in rgb]
             return 0.2126*r + 0.7152*g + 0.0722*b
-        from .core.config import hex2rgb
+        from cargosim.core.config import hex2rgb
         fg = hex2rgb(cfg.theme.game_fg); bg = hex2rgb(cfg.theme.game_bg)
         L1, L2 = luminance(fg), luminance(bg)
         ratio = (max(L1,L2)+0.05)/(min(L1,L2)+0.05)
@@ -453,7 +453,7 @@ def main(*, force_windowed: bool = False):
     
     # Apply the comprehensive theme system early in startup
     log_runtime_event("Importing UI theme modules")
-    from .rendering.themes.ui_theme import apply_theme, create_palette_from_theme_config
+    from cargosim.rendering.themes.ui_theme import apply_theme, create_palette_from_theme_config
     
     log_runtime_event("Creating theme palette from configuration")
     palette = create_palette_from_theme_config(cfg.theme)

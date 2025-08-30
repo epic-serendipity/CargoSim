@@ -66,9 +66,9 @@ db.sqlite3
 db.sqlite3-journal
 
 # CargoSim specific
-# Log files (runtime and debug)
-logs/runtime/*.log
-logs/debug/*.log
+# Log files and directories (runtime and debug)
+logs/
+*.log
 
 # User-specific configurations
 configs/user/**

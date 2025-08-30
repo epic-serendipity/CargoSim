@@ -3,22 +3,22 @@
 __version__ = "0.1.0"
 
 # Core functionality
-from .core.config import (
+from cargosim.core.config import (
     SimConfig, load_config, save_config, apply_theme_preset,
     THEME_PRESETS, AIRFRAME_COLORSETS, CURSOR_COLORS, validate_config
 )
-from .core.simulation import LogisticsSim, Aircraft
-from .core.utils import clamp, ellipsize, setup_logging, get_logger
+from cargosim.core.simulation import LogisticsSim, Aircraft
+from cargosim.core.utils import clamp, ellipsize, setup_logging, get_logger
 
 # Rendering and visualization
-from .rendering.renderer import Renderer
-from .rendering.recorder import Recorder, NullRecorder
+from cargosim.rendering.renderer import Renderer
+from cargosim.rendering.recorder import Recorder, NullRecorder
 
 # User interface
-from .ui.gui import ControlGUI
+from cargosim.ui.gui import ControlGUI
 
 # Advanced features
-from .features.smart_targeting import SmartTargeting
+from cargosim.features.smart_targeting import SmartTargeting
 
 __all__ = [
     # Core

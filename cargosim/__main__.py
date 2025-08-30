@@ -2,7 +2,7 @@
 
 import argparse
 import sys
-from .main import main as gui_main, load_config, LogisticsSim
+from cargosim.main import main as gui_main, load_config, LogisticsSim
 
 
 def run_headless(periods: int, seed: int) -> int:

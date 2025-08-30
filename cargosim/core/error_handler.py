@@ -17,7 +17,7 @@ from functools import wraps
 import tkinter as tk
 from tkinter import messagebox
 
-from .utils import get_logger, log_runtime_event, log_exception
+from cargosim.core.utils import get_logger, log_runtime_event, log_exception
 
 # Global error handler instance
 _error_handler = None

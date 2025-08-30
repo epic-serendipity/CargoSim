@@ -4,10 +4,11 @@ import os
 import json
 import copy
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict, Literal, NamedTuple
+from typing import List, Tuple, Optional, Dict, Literal, NamedTuple, Any
+import logging
 
 # Configuration constants
-from .paths import USER_MAIN_CONFIG_FILE, MAIN_CONFIG_FILE
+from cargosim.core.paths import USER_MAIN_CONFIG_FILE, MAIN_CONFIG_FILE
 CONFIG_FILE = str(USER_MAIN_CONFIG_FILE)
 CONFIG_VERSION = 9
 
@@ -2041,6 +2042,15 @@ class SimConfig:
     cost_per_flight_hour: float = 1500.0  # Cost per flight hour in dollars
     turnover_time_multiplier: float = 12.0  # Multiplier for base turnover time (hours spent resting at hub)
     speed_units: str = "mach"  # Speed units ("mach" or "knots")
+    
+    # Fleet management configuration
+    last_fleet_preset_used: Optional[str] = None  # Name of the last fleet preset used
+    
+    # Spoke configuration for fleet builder
+    spoke_config: Optional[Dict[str, Any]] = None  # Spoke configuration from fleet builder
+    
+    # Custom aircraft configuration
+    custom_aircraft_config: Optional[Dict[str, Any]] = None  # Custom aircraft settings
 
     def to_json(self) -> dict:
         return {
@@ -2084,6 +2094,9 @@ class SimConfig:
             "cost_per_flight_hour": self.cost_per_flight_hour,
             "turnover_time_multiplier": self.turnover_time_multiplier,
             "speed_units": self.speed_units,
+            "last_fleet_preset_used": self.last_fleet_preset_used,
+            "spoke_config": self.spoke_config,
+            "custom_aircraft_config": self.custom_aircraft_config,
         }
 
     @staticmethod
@@ -2148,6 +2161,16 @@ class SimConfig:
         cfg.cost_per_flight_hour = float(d.get("cost_per_flight_hour", cfg.cost_per_flight_hour))
         cfg.turnover_time_multiplier = float(d.get("turnover_time_multiplier", cfg.turnover_time_multiplier))
         cfg.speed_units = d.get("speed_units", cfg.speed_units)
+        
+        # Load fleet management configuration
+        cfg.last_fleet_preset_used = d.get("last_fleet_preset_used", cfg.last_fleet_preset_used)
+        
+        # Load spoke configuration
+        cfg.spoke_config = d.get("spoke_config", cfg.spoke_config)
+        
+        # Load custom aircraft configuration
+        cfg.custom_aircraft_config = d.get("custom_aircraft_config", cfg.custom_aircraft_config)
+        
         return cfg
 
 
@@ -2191,8 +2214,8 @@ def validate_config(cfg: SimConfig) -> List[str]:
         for i, pair in enumerate(cfg.pair_order):
             if not isinstance(pair, tuple) or len(pair) != 2:
                 issues.append(f"Pair {i} must be a tuple of length 2")
-            elif not all(isinstance(x, int) and 0 <= x < M for x in pair):
-                issues.append(f"Pair {i} indices must be integers between 0 and {M-1}")
+            elif not all(isinstance(x, int) and 0 <= x < len(cfg.spoke_distances) for x in pair):
+                issues.append(f"Pair {i} indices must be integers between 0 and {len(cfg.spoke_distances)-1}")
     
     # Theme validation
     if cfg.cursor_color not in CURSOR_COLORS:
@@ -2218,8 +2241,10 @@ def validate_config(cfg: SimConfig) -> List[str]:
         issues.append("Speed units must be 'mach' or 'knots'")
     
     # Validate spoke distances
-    if len(cfg.spoke_distances) != M:
-        issues.append(f"Spoke distances must have exactly {M} elements")
+    if len(cfg.spoke_distances) < 1:
+        issues.append("Spoke distances must have at least 1 element")
+    elif len(cfg.spoke_distances) > 20:
+        issues.append("Spoke distances cannot exceed 20 elements")
     else:
         for i, distance in enumerate(cfg.spoke_distances):
             if distance < 100 or distance > 1200:
@@ -2227,7 +2252,7 @@ def validate_config(cfg: SimConfig) -> List[str]:
     
     # Fleet validation - ensure Fleet Builder pallet has aircraft
     try:
-        from ..ui.fleet_builder import get_fleet_builder
+        from cargosim.ui.fleet_builder import get_fleet_builder
         fleet_builder = get_fleet_builder()
         current_fleet = fleet_builder.get_current_fleet()
         if not current_fleet or sum(current_fleet.values()) == 0:
@@ -2238,6 +2263,36 @@ def validate_config(cfg: SimConfig) -> List[str]:
     
     return issues
 
+
+def repair_spoke_configuration(cfg: SimConfig) -> SimConfig:
+        """Repair inconsistent spoke configuration by prioritizing spoke_config."""
+        if not cfg.spoke_config:
+            return cfg
+        
+        # Check if main configuration is inconsistent with spoke_config
+        spoke_distances = cfg.spoke_config.get('spoke_distances', [])
+        max_spokes = cfg.spoke_config.get('max_spokes', 10)
+        variable_spoke_count = cfg.spoke_config.get('variable_spoke_count', False)
+        
+        if spoke_distances and len(spoke_distances) != cfg.max_spokes:
+            print(f"Repairing inconsistent configuration: main has {cfg.max_spokes} spokes, "
+                  f"spoke_config has {len(spoke_distances)} spokes")
+            
+            # Update main configuration to match spoke_config
+            cfg.spoke_distances = spoke_distances
+            cfg.max_spokes = max_spokes
+            cfg.variable_spoke_count = variable_spoke_count
+            
+            # Generate new pair order for the actual spoke count
+            if spoke_distances:
+                actual_spoke_count = len(spoke_distances)
+                cfg.pair_order = [(i, i+1) for i in range(0, actual_spoke_count-1, 2)]
+                if actual_spoke_count % 2 == 1:  # Odd number of spokes
+                    cfg.pair_order.append((actual_spoke_count-1, 0))  # Connect last spoke to hub
+                
+                print(f"Repaired configuration: {actual_spoke_count} spokes, {len(cfg.pair_order)} pairs")
+        
+        return cfg
 
 def load_config() -> SimConfig:
     # If user-level config missing, copy default template
@@ -2253,6 +2308,7 @@ def load_config() -> SimConfig:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             cfg = SimConfig.from_json(data)
+            cfg = repair_spoke_configuration(cfg)
             if cfg.config_version < CONFIG_VERSION:
                 cfg.config_version = CONFIG_VERSION
                 save_config(cfg)

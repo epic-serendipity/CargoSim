@@ -98,6 +98,14 @@ def ensure_directories():
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
 
+def get_config_dir() -> Path:
+    """Get the default configuration directory."""
+    return DEFAULT_CONFIGS_DIR
+
+def get_user_config_dir() -> Path:
+    """Get the user configuration directory."""
+    return USER_CONFIGS_DIR
+
 # Ensure directories exist when module is imported
 ensure_directories()
 _ensure_user_aircraft_config()

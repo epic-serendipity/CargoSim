@@ -13,8 +13,8 @@ from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .paths import USER_MAIN_CONFIG_FILE, USER_CONFIGS_DIR, DEFAULT_CONFIGS_DIR
-from .config import CONFIG_VERSION, SimConfig, ThemeConfig
+from cargosim.core.paths import USER_MAIN_CONFIG_FILE, USER_CONFIGS_DIR, DEFAULT_CONFIGS_DIR
+from cargosim.core.config import CONFIG_VERSION, SimConfig, ThemeConfig
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -408,9 +408,19 @@ class ConfigMigrationManager:
         # Validate and fix spoke distances
         if "spoke_distances" in config_data:
             spoke_distances = config_data["spoke_distances"]
-            if not isinstance(spoke_distances, list) or len(spoke_distances) != 10:
-                config_data["spoke_distances"] = [100.0] * 10
-                logger.info("Fixed spoke_distances to have 10 elements of 100 miles each")
+            if not isinstance(spoke_distances, list):
+                # Create default spoke distances based on max_spokes or use 10 as fallback
+                max_spokes = config_data.get("max_spokes", 10)
+                config_data["spoke_distances"] = [100.0] * max_spokes
+                logger.info(f"Fixed spoke_distances to have {max_spokes} elements of 100 miles each")
+            elif len(spoke_distances) < 1:
+                # Ensure at least 1 spoke
+                config_data["spoke_distances"] = [100.0]
+                logger.info("Fixed spoke_distances to have 1 element of 100 miles")
+            elif len(spoke_distances) > 20:
+                # Limit to 20 spokes maximum
+                config_data["spoke_distances"] = spoke_distances[:20]
+                logger.info("Limited spoke_distances to 20 elements maximum")
             
             # Ensure all distances are within valid range (100-1000 miles)
             for i, distance in enumerate(config_data["spoke_distances"]):

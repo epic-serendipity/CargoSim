@@ -229,6 +229,11 @@ def validate_cost_per_hour(cost: float) -> ValidationResult:
 
 def validate_spoke_count(spoke_count: int, max_spokes: int = 15) -> ValidationResult:
     """Validate spoke count and provide performance warnings."""
+    import logging
+    logger = logging.getLogger("cargosim.core.validation")
+    
+    logger.debug(f"Validating spoke count: {spoke_count}, max_spokes: {max_spokes}")
+    
     rule = ValidationRule(
         field_name="spoke_count",
         min_value=1,
@@ -246,31 +251,42 @@ def validate_spoke_count(spoke_count: int, max_spokes: int = 15) -> ValidationRe
     # Type validation
     is_valid, type_errors, type_warnings = validate_type(spoke_count, (int,), rule.field_name)
     if not is_valid:
+        logger.warning(f"Spoke count type validation failed: {type_errors}")
         errors.extend(type_errors)
         field_issues[rule.field_name].extend(type_errors)
     
     # Range validation
     is_valid, range_errors, range_warnings = validate_range(spoke_count, rule.min_value, rule.max_value, rule.field_name)
     if not is_valid:
+        logger.warning(f"Spoke count range validation failed: {range_errors}")
         errors.extend(range_errors)
         field_issues[rule.field_name].extend(range_errors)
     
     # Warning threshold check
     if rule.warning_threshold and spoke_count > rule.warning_threshold:
+        logger.info(f"Spoke count {spoke_count} exceeds warning threshold {rule.warning_threshold}")
         warnings.append(rule.warning_message)
         field_issues[rule.field_name].append(rule.warning_message)
     
     # Critical performance warning
     if spoke_count > 12:
+        logger.warning(f"Very high spoke count {spoke_count} - performance may be significantly impacted")
         warnings.append("Very high spoke count - performance may be significantly impacted")
         field_issues[rule.field_name].append("Very high spoke count - performance may be significantly impacted")
     
-    return ValidationResult(
+    validation_result = ValidationResult(
         is_valid=len(errors) == 0,
         errors=errors,
         warnings=warnings,
         field_issues=field_issues
     )
+    
+    if validation_result.is_valid:
+        logger.debug(f"Spoke count validation passed: {spoke_count}")
+    else:
+        logger.error(f"Spoke count validation failed: {errors}")
+    
+    return validation_result
 
 
 def cross_validate_aircraft_performance(speed_mach: float, spoke_distances: List[float], 
@@ -560,9 +576,9 @@ def validate_spoke_distances_array(distances: List[float]) -> ValidationResult:
         field_issues["spoke_distances"].append("Spoke distances list cannot be empty")
         return ValidationResult(False, errors, warnings, field_issues)
     
-    if len(distances) > 15:
-        errors.append("Maximum 15 spokes allowed")
-        field_issues["spoke_distances"].append("Maximum 15 spokes allowed")
+    if len(distances) > 20:
+        errors.append("Maximum 20 spokes allowed")
+        field_issues["spoke_distances"].append("Maximum 20 spokes allowed")
         return ValidationResult(False, errors, warnings, field_issues)
     
     # Validate individual distances

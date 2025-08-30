@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
-from .paths import DEBUG_LOG_FILE, RUNTIME_LOG_FILE
+from cargosim.core.paths import DEBUG_LOG_FILE, RUNTIME_LOG_FILE
 
 # Global correlation ID for tracking simulation runs
 _run_id = contextvars.ContextVar("run_id", default=str(uuid.uuid4()))
@@ -65,9 +65,13 @@ class ColoredFormatter(logging.Formatter):
         'RESET': '\033[0m'        # Reset
     }
     
+    def __init__(self, fmt=None, datefmt=None, style='%', use_colors=True):
+        super().__init__(fmt, datefmt, style)
+        self.use_colors = use_colors
+    
     def format(self, record):
-        # Add color to the log level
-        if hasattr(record, 'levelname') and record.levelname in self.COLORS:
+        # Add color to the log level only if colors are enabled
+        if self.use_colors and hasattr(record, 'levelname') and record.levelname in self.COLORS:
             record.levelname = f"{self.COLORS[record.levelname]}{record.levelname}{self.COLORS['RESET']}"
         
         # Add correlation ID if present
@@ -130,7 +134,7 @@ class LogManager:
         self.handlers = {}
         self.filters = {}
         self.log_levels = {
-            'console': logging.INFO,
+            'console': logging.WARNING,  # Changed from INFO to WARNING to only show warnings and above
             'file': logging.DEBUG,
             'runtime': logging.DEBUG,
             'error': logging.ERROR
@@ -185,7 +189,8 @@ class LogManager:
         else:
             console_formatter = ColoredFormatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                datefmt='%H:%M:%S'
+                datefmt='%H:%M:%S',
+                use_colors=True
             )
         console_handler.setFormatter(console_formatter)
         
@@ -198,7 +203,7 @@ class LogManager:
         file_handler = self._create_rotating_file_handler(
             DEBUG_LOG_FILE,
             max_bytes=10*1024*1024,  # 10MB
-            backup_count=5
+            backup_count=10  # Changed from 5 to 10 for consistency
         )
         file_handler.setLevel(self.log_levels['file'])
         
@@ -215,39 +220,126 @@ class LogManager:
         logger.addHandler(console_handler)
         logger.addHandler(file_handler)
         
+        # Add error handler to ensure all errors go to error log
+        error_log_file = Path(DEBUG_LOG_FILE).parent / "error.log"
+        error_handler = logging.FileHandler(error_log_file, encoding="utf-8", mode="a")
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s\n'
+            'Exception: %(exc_info)s\n'
+            'Stack Trace: %(stack_info)s\n'
+            '---\n'
+        ))
+        logger.addHandler(error_handler)
+        
+        # Add warning handler to ensure all warnings are captured
+        warning_log_file = Path(DEBUG_LOG_FILE).parent / "warning.log"
+        warning_handler = logging.FileHandler(warning_log_file, encoding="utf-8", mode="a")
+        warning_handler.setLevel(logging.WARNING)
+        warning_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+        ))
+        logger.addHandler(warning_handler)
+        
         # Store references
         self.loggers['main'] = logger
         self.handlers['main_console'] = console_handler
         self.handlers['main_file'] = file_handler
+        self.handlers['main_error'] = error_handler
+        self.handlers['main_warning'] = warning_handler
     
     def _setup_runtime_logger(self):
-        """Setup the runtime logger for execution tracking."""
+        """Setup the runtime logger for execution tracking with custom rotation."""
         logger = logging.getLogger("cargosim.runtime")
         logger.setLevel(logging.DEBUG)
         
         # Clear existing handlers
         logger.handlers.clear()
         
-        # Runtime file handler with rotation
-        runtime_handler = self._create_rotating_file_handler(
-            RUNTIME_LOG_FILE,
-            max_bytes=5*1024*1024,  # 5MB
-            backup_count=3
-        )
+        # Create custom rotating runtime log handler
+        runtime_handler = self._create_custom_rotating_runtime_handler()
         runtime_handler.setLevel(self.log_levels['runtime'])
         
-        # Create detailed formatter for runtime
+        # Create detailed formatter for runtime file (no colors for file output)
         runtime_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d:%(funcName)s] - %(message)s'
+            '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d:%(funcName)s] - %(message)s',
+            datefmt='%H:%M:%S'
         )
         runtime_handler.setFormatter(runtime_formatter)
         
         # Add handler to logger
         logger.addHandler(runtime_handler)
         
+        # Also add a console handler for runtime logs to ensure warnings are visible
+        runtime_console_handler = logging.StreamHandler(sys.stdout)
+        runtime_console_handler.setLevel(logging.WARNING)  # Only show warnings and above in console
+        runtime_console_handler.setFormatter(ColoredFormatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%H:%M:%S',
+            use_colors=True
+        ))
+        logger.addHandler(runtime_console_handler)
+        
+        # Add a dedicated warning handler for runtime logs
+        runtime_warning_handler = logging.FileHandler(
+            Path(RUNTIME_LOG_FILE).parent / "cargo_sim_runtime_warnings.log",
+            encoding="utf-8", mode="a"
+        )
+        runtime_warning_handler.setLevel(logging.WARNING)
+        runtime_warning_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d:%(funcName)s] - %(message)s',
+            datefmt='%H:%M:%S'
+        ))
+        logger.addHandler(runtime_warning_handler)
+        
+        # Ensure propagation to root logger for comprehensive logging
+        logger.propagate = True
+        
         # Store references
         self.loggers['runtime'] = logger
         self.handlers['runtime_file'] = runtime_handler
+        self.handlers['runtime_console'] = runtime_console_handler
+        self.handlers['runtime_warning'] = runtime_warning_handler
+    
+    def _create_custom_rotating_runtime_handler(self):
+        """Create a custom rotating runtime log handler with runtime_#.log naming."""
+        runtime_logs_dir = Path(RUNTIME_LOG_FILE).parent
+        
+        # Ensure runtime logs directory exists
+        runtime_logs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Rotate existing logs: delete runtime_9.log, rename runtime_8.log to runtime_9.log, etc.
+        self._rotate_runtime_logs(runtime_logs_dir)
+        
+        # Create new runtime_0.log file
+        new_log_file = runtime_logs_dir / "runtime_0.log"
+        
+        # Create file handler for the new log
+        handler = logging.FileHandler(new_log_file, encoding="utf-8", mode="w")
+        
+        return handler
+    
+    def _rotate_runtime_logs(self, runtime_logs_dir: Path):
+        """Rotate runtime logs using runtime_#.log naming convention."""
+        try:
+            # Delete the oldest log (runtime_9.log) if it exists
+            oldest_log = runtime_logs_dir / "runtime_9.log"
+            if oldest_log.exists():
+                oldest_log.unlink()
+                print(f"Removed oldest runtime log: {oldest_log}")
+            
+            # Rotate logs: rename runtime_8.log to runtime_9.log, runtime_7.log to runtime_8.log, etc.
+            for i in range(8, -1, -1):
+                current_log = runtime_logs_dir / f"runtime_{i}.log"
+                next_log = runtime_logs_dir / f"runtime_{i + 1}.log"
+                
+                if current_log.exists():
+                    current_log.rename(next_log)
+                    print(f"Rotated runtime log: {current_log.name} -> {next_log.name}")
+                    
+        except Exception as e:
+            print(f"Warning: Failed to rotate runtime logs: {e}")
+            # Continue with logging setup even if rotation fails
     
     def _setup_error_logger(self):
         """Setup the error logger for error tracking."""
@@ -262,7 +354,7 @@ class LogManager:
         error_handler = self._create_rotating_file_handler(
             error_log_file,
             max_bytes=2*1024*1024,  # 2MB
-            backup_count=5
+            backup_count=10  # Changed from 5 to 10 for consistency
         )
         error_handler.setLevel(self.log_levels['error'])
         
@@ -295,7 +387,7 @@ class LogManager:
         perf_handler = self._create_rotating_file_handler(
             perf_log_file,
             max_bytes=1*1024*1024,  # 1MB
-            backup_count=3
+            backup_count=10
         )
         perf_handler.setLevel(logging.INFO)
         

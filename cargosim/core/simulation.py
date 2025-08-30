@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import List, Tuple, Optional
 
-from .config import M, PAIR_ORDER_DEFAULT, A_PERIOD_DAYS_DFLT, B_PERIOD_DAYS_DFLT, C_PERIOD_DAYS_DFLT, D_PERIOD_DAYS_DFLT, DEFAULT_BAR_SCALE_DENOMINATORS
-from .config import SimConfig
-from ..features.smart_targeting import SmartTargeting, TargetingConfig
+from cargosim.core.config import M, PAIR_ORDER_DEFAULT, A_PERIOD_DAYS_DFLT, B_PERIOD_DAYS_DFLT, C_PERIOD_DAYS_DFLT, D_PERIOD_DAYS_DFLT, DEFAULT_BAR_SCALE_DENOMINATORS
+from cargosim.core.config import SimConfig
+from cargosim.features.smart_targeting import SmartTargeting, TargetingConfig
 
 
 def _row_to_spoke(row: List[float]) -> SimpleNamespace:
@@ -122,8 +122,17 @@ class Aircraft:
 class LogisticsSim:
     def __init__(self, cfg: SimConfig):
         self.cfg = cfg
-        self.M = M
-        self.PAIR_ORDER = list(cfg.pair_order)
+        # Use actual spoke count from configuration instead of hardcoded M constant
+        self.M = len(cfg.spoke_distances) if cfg.spoke_distances else M
+        
+        # Generate PAIR_ORDER based on actual spoke count if it doesn't match
+        if cfg.pair_order and len(cfg.pair_order) * 2 <= self.M:
+            self.PAIR_ORDER = list(cfg.pair_order)
+        else:
+            # Generate default pair order for the actual spoke count
+            self.PAIR_ORDER = [(i, i+1) for i in range(0, self.M-1, 2)]
+            if self.M % 2 == 1:  # Odd number of spokes
+                self.PAIR_ORDER.append((self.M-1, 0))  # Connect last spoke to hub
         self.A_PERIOD_DAYS = cfg.a_days
         self.B_PERIOD_DAYS = cfg.b_days
         self.C_PERIOD_DAYS = cfg.c_days
@@ -662,7 +671,7 @@ class LogisticsSim:
         
         # Use the Fleet Builder pallet as the single source of truth
         try:
-            from ..ui.fleet_builder import get_fleet_builder, FleetComposition
+            from cargosim.ui.fleet_builder import get_fleet_builder, FleetComposition
             fleet_builder = get_fleet_builder()
             
             # Get the current fleet from the Fleet Builder pallet
@@ -711,7 +720,7 @@ class LogisticsSim:
         if label == "2xCustom_Transport":
             # Handle custom transport with its configured attributes
             try:
-                from ..ui.fleet_builder import get_aircraft_config_manager
+                from cargosim.ui.fleet_builder import get_aircraft_config_manager
                 config_manager = get_aircraft_config_manager()
                 if "Custom_Transport" in config_manager.aircraft_types:
                     custom_type = config_manager.aircraft_types["Custom_Transport"]
@@ -743,7 +752,7 @@ class LogisticsSim:
         if label == "3xCustom_Transport":
             # Handle custom transport with its configured attributes
             try:
-                from ..ui.fleet_builder import get_aircraft_config_manager
+                from cargosim.ui.fleet_builder import get_aircraft_config_manager
                 config_manager = get_aircraft_config_manager()
                 if "Custom_Transport" in config_manager.aircraft_types:
                     custom_type = config_manager.aircraft_types["Custom_Transport"]
@@ -778,7 +787,7 @@ class LogisticsSim:
         if label == "1xC130_1xCustom_Transport":
             # Handle mixed fleet with custom transport
             try:
-                from ..ui.fleet_builder import get_aircraft_config_manager
+                from cargosim.ui.fleet_builder import get_aircraft_config_manager
                 config_manager = get_aircraft_config_manager()
                 if "Custom_Transport" in config_manager.aircraft_types:
                     custom_type = config_manager.aircraft_types["Custom_Transport"]
@@ -837,7 +846,7 @@ class LogisticsSim:
                     elif aircraft_type == "Custom_Transport":
                         # Handle custom transport with its configured attributes
                         try:
-                            from ..ui.fleet_builder import get_aircraft_config_manager
+                            from cargosim.ui.fleet_builder import get_aircraft_config_manager
                             config_manager = get_aircraft_config_manager()
                             if aircraft_type in config_manager.aircraft_types:
                                 custom_type = config_manager.aircraft_types[aircraft_type]
@@ -868,7 +877,7 @@ class LogisticsSim:
                     else:
                         # For other aircraft types, try to get from fleet builder
                         try:
-                            from ..ui.fleet_builder import get_aircraft_config_manager
+                            from cargosim.ui.fleet_builder import get_aircraft_config_manager
                             config_manager = get_aircraft_config_manager()
                             if aircraft_type in config_manager.aircraft_types:
                                 aircraft_type_config = config_manager.aircraft_types[aircraft_type]
@@ -926,7 +935,7 @@ class LogisticsSim:
                 elif aircraft_id == "Custom_Transport":
                     # Handle custom transport with its configured attributes
                     try:
-                        from ..ui.fleet_builder import get_aircraft_config_manager
+                        from cargosim.ui.fleet_builder import get_aircraft_config_manager
                         config_manager = get_aircraft_config_manager()
                         if aircraft_id in config_manager.aircraft_types:
                             custom_type = config_manager.aircraft_types[aircraft_id]
@@ -952,7 +961,7 @@ class LogisticsSim:
                 else:
                     # For other aircraft types, try to get from fleet builder
                     try:
-                        from ..ui.fleet_builder import get_aircraft_config_manager
+                        from cargosim.ui.fleet_builder import get_aircraft_config_manager
                         config_manager = get_aircraft_config_manager()
                         if aircraft_id in config_manager.aircraft_types:
                             aircraft_type = config_manager.aircraft_types[aircraft_id]
@@ -1287,7 +1296,7 @@ class LogisticsSim:
         
         # Try to get range from aircraft type configuration
         try:
-            from ..ui.fleet_builder import get_aircraft_config_manager
+            from cargosim.ui.fleet_builder import get_aircraft_config_manager
             config_manager = get_aircraft_config_manager()
             if aircraft.typ in config_manager.aircraft_types:
                 aircraft_type = config_manager.aircraft_types[aircraft.typ]
@@ -1735,7 +1744,7 @@ class LogisticsSim:
         self.push_snapshot()
 
         if self.cfg.debug_mode:
-            from .utils import append_debug
+            from cargosim.core.utils import append_debug
             lines = [f"[t={self.t} {self.half} day={self.t//2}] ops={self.ops_count()}"]
             lines += [f"  {nm}: {act}" for (nm, act) in actions_this_period]
             append_debug(lines)
@@ -1833,7 +1842,7 @@ class LogisticsSim:
                     violations.append(f"C/D not consumed for ops at S{s+1}")
         self.integrity_violations = violations
         if violations and not self._integrity_logged:
-            from .utils import append_debug
+            from cargosim.core.utils import append_debug
             append_debug(["Integrity violations:"] + violations)
             self._integrity_logged = True
 
@@ -2269,8 +2278,8 @@ class LogisticsSim:
                 try:
                     # Ensure self.M is properly initialized
                     if not hasattr(self, 'M') or self.M <= 0:
-                        # Fallback to default value if M is not properly set
-                        self.M = 10
+                        # Fallback to actual spoke count from configuration
+                        self.M = len(self.cfg.spoke_distances) if self.cfg.spoke_distances else 10
                     
                     # Extract spoke number and validate
                     spoke_str = location[1:]
