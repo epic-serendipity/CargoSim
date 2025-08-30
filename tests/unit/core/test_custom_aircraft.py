@@ -4,9 +4,6 @@
 import sys
 import os
 
-# Add the cargosim package to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from cargosim.ui.fleet_builder import FleetBuilder, AircraftType, get_aircraft_config_manager
 from cargosim.core.config import SimConfig
 from cargosim.main import run_sim

@@ -14,10 +14,6 @@ import tkinter as tk
 from unittest.mock import Mock, patch, MagicMock, call
 import logging
 import sys
-import os
-
-# Add the project root to the path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 # Try to import the error handling functions, with fallback to mocks if needed
 try:

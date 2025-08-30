@@ -7,9 +7,6 @@ This script tests the new state machine and animation system.
 import sys
 import os
 
-# Add the cargosim package to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'cargosim'))
-
 def test_enhanced_features():
     """Test the enhanced aircraft animation and spoke bar features."""
     try:

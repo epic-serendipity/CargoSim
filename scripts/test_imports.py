@@ -13,9 +13,6 @@ from pathlib import Path
 def test_module_import(module_name: str) -> tuple[bool, str]:
     """Test if a module can be imported successfully."""
     try:
-        # Add the current directory to Python path for testing
-        if 'cargosim' not in sys.path:
-            sys.path.insert(0, os.getcwd())
         importlib.import_module(module_name)
         return True, ""
     except Exception as e:

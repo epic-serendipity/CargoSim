@@ -1,9 +1,6 @@
 import sys
-import os
-import sys
 from types import SimpleNamespace
 
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import cargo_sim
 import cargosim.__main__ as cm
 

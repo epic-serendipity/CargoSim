@@ -4,9 +4,6 @@
 import sys
 import os
 
-# Add the cargosim directory to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'cargosim'))
-
 def test_fleet_builder():
     """Test the fleet builder functionality."""
     print("Testing Fleet Builder System...")

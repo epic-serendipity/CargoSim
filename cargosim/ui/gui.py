@@ -3937,13 +3937,7 @@ class ControlGUI:
 
 
 if __name__ == "__main__":
-    # This allows the file to be run directly for testing
-    import os
+    # Run via module: python -m cargosim
+    from cargosim.__main__ import main
     import sys
-    
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    
-    from cargosim.main import main
-    
-    # Load config and run main
-    main()
+    sys.exit(main())

@@ -16,10 +16,6 @@ import subprocess
 import argparse
 from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
 from cargosim.core.logging_config import (
     setup_comprehensive_logging, 
     set_correlation_id, 

@@ -6,9 +6,6 @@ Test script to verify that all renderer AttributeErrors have been fixed.
 import sys
 import os
 
-# Add the project root to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 def test_renderer_complete():
     """Test that the renderer can be fully initialized and used."""
     print("Testing Complete Renderer Fix")
