@@ -326,7 +326,8 @@ class LogManager:
             oldest_log = runtime_logs_dir / "runtime_9.log"
             if oldest_log.exists():
                 oldest_log.unlink()
-                print(f"Removed oldest runtime log: {oldest_log}")
+                # Avoid noisy console prints during rotation; log at debug level instead
+                logging.getLogger("cargosim").debug(f"Removed oldest runtime log: {oldest_log}")
             
             # Rotate logs: rename runtime_8.log to runtime_9.log, runtime_7.log to runtime_8.log, etc.
             for i in range(8, -1, -1):
@@ -335,10 +336,13 @@ class LogManager:
                 
                 if current_log.exists():
                     current_log.rename(next_log)
-                    print(f"Rotated runtime log: {current_log.name} -> {next_log.name}")
+                    # Quiet terminal output; keep an internal debug trace
+                    logging.getLogger("cargosim").debug(
+                        f"Rotated runtime log: {current_log.name} -> {next_log.name}")
                     
         except Exception as e:
-            print(f"Warning: Failed to rotate runtime logs: {e}")
+            # Do not print directly to stdout; use logging to avoid terminal noise
+            logging.getLogger("cargosim").warning(f"Failed to rotate runtime logs: {e}")
             # Continue with logging setup even if rotation fails
     
     def _setup_error_logger(self):

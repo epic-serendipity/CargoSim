@@ -2275,8 +2275,10 @@ def repair_spoke_configuration(cfg: SimConfig) -> SimConfig:
         variable_spoke_count = cfg.spoke_config.get('variable_spoke_count', False)
         
         if spoke_distances and len(spoke_distances) != cfg.max_spokes:
-            print(f"Repairing inconsistent configuration: main has {cfg.max_spokes} spokes, "
-                  f"spoke_config has {len(spoke_distances)} spokes")
+            import logging
+            logging.getLogger("cargosim.core.config").info(
+                f"Repairing inconsistent configuration: main has {cfg.max_spokes} spokes, "
+                f"spoke_config has {len(spoke_distances)} spokes")
             
             # Update main configuration to match spoke_config
             cfg.spoke_distances = spoke_distances
@@ -2290,7 +2292,8 @@ def repair_spoke_configuration(cfg: SimConfig) -> SimConfig:
                 if actual_spoke_count % 2 == 1:  # Odd number of spokes
                     cfg.pair_order.append((actual_spoke_count-1, 0))  # Connect last spoke to hub
                 
-                print(f"Repaired configuration: {actual_spoke_count} spokes, {len(cfg.pair_order)} pairs")
+                logging.getLogger("cargosim.core.config").info(
+                    f"Repaired configuration: {actual_spoke_count} spokes, {len(cfg.pair_order)} pairs")
         
         return cfg
 
