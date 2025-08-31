@@ -1,8 +1,13 @@
-"""Command-line entry point for CargoSim."""
+"""Command-line entry point for CargoSim.
+
+Minimizes import-time overhead by importing heavy GUI paths only
+when needed. Headless mode imports core modules directly.
+"""
 
 import argparse
 import sys
-from cargosim.main import main as gui_main, load_config, LogisticsSim
+from cargosim.core.config import load_config
+from cargosim.core.simulation import LogisticsSim
 
 
 def run_headless(periods: int, seed: int) -> int:
@@ -49,6 +54,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.headless:
         return run_headless(args.periods, args.seed)
+    # Defer GUI import to avoid loading tkinter/pygame unless needed
+    from cargosim.main import main as gui_main
     gui_main(force_windowed=args.windowed)
     return 0
 
