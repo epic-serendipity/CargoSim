@@ -1,3 +1,0 @@
-# This file ensures the logs directory is tracked in git
-# The logs directory contains runtime and debug logs
-# Log files themselves are gitignored
