@@ -1,6 +1,7 @@
 """Pygame rendering and visualization for CargoSim."""
 
 import os
+import warnings
 import math
 import time
 from typing import List, Tuple, Optional, Dict, Any
@@ -9,6 +10,13 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 # Import pygame at module level to ensure it's available throughout
+# Suppress known deprecation warning emitted inside pygame about pkg_resources
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API",
+    category=UserWarning,
+    module=r"pygame\.pkgdata"
+)
 try:
     import pygame
 except ImportError:
