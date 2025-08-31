@@ -122,12 +122,27 @@ class ControlGUI:
             
             # Initialize ConfigurationManager
             try:
-                from cargosim.ui.fleet_builder_gui import ConfigurationManager
-                self.configuration_manager = ConfigurationManager(self.cfg)
-                log_runtime_event("ConfigurationManager initialized")
+                from cargosim.core.configuration_manager import get_configuration_manager
+                self.configuration_manager = get_configuration_manager()
+                # Set the current configuration in the manager
+                if self.configuration_manager:
+                    self.configuration_manager.set_configuration(self.cfg)
+                log_runtime_event("ConfigurationManager initialized with current configuration")
             except Exception as e:
                 log_runtime_event("Failed to initialize ConfigurationManager", f"error={e}")
                 self.configuration_manager = None
+
+            # Add configuration health monitoring
+            if self.configuration_manager:
+                try:
+                    from cargosim.core.health import ConfigurationStatus
+                    health_status = self.configuration_manager.get_configuration_health()
+                    if health_status.status != ConfigurationStatus.VALID:
+                        log_runtime_event(f"Configuration health issue: {health_status.status}")
+                        # Trigger recovery if needed
+                        self.configuration_manager.force_configuration_validation()
+                except Exception as e:
+                    log_runtime_event(f"Could not check configuration health: {e}")
 
             log_runtime_event("Building configuration tab")
             self.build_config_tab(self.tab_config)
@@ -2087,7 +2102,7 @@ class ControlGUI:
             try:
                 if hasattr(self.fleet_builder_tab, 'fleet_builder') and self.fleet_builder_tab.fleet_builder:
                     # Wait a bit for the fleet builder to fully initialize
-                    self.after(500, self._load_startup_fleet)
+                    self.root.after(500, self._load_startup_fleet)
                 else:
                     logger.warning("Fleet builder not available for loading fleet")
             except Exception as e:

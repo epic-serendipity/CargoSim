@@ -554,6 +554,26 @@ class ConfigurationManager:
         with self._lock:
             return self._config_cache
     
+    def set_configuration(self, config: SimConfig) -> bool:
+        """
+        Set the current configuration.
+        
+        Args:
+            config: SimConfig instance to set
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            with self._lock:
+                self._config_cache = config
+                self._last_modified = time.time()
+                logger.info("Configuration set successfully")
+                return True
+        except Exception as e:
+            logger.error(f"Error setting configuration: {e}")
+            return False
+    
     def save_spoke_config(self, spoke_config: Dict[str, Any]) -> bool:
         """
         Save spoke configuration.

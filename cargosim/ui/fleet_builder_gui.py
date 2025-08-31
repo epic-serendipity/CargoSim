@@ -1626,87 +1626,14 @@ class FleetPresetPanel(ttk.Frame):
                 pass
 
 
-class ConfigurationManager:
+# ConfigurationManager class removed - now using core configuration manager
     """Centralized configuration management that doesn't rely on widget hierarchy."""
     
-    def __init__(self, main_config):
-        self.main_config = main_config
-        self.logger = logging.getLogger(__name__)
+# Method removed - now using core configuration manager
         
-    def save_spoke_config(self, spoke_config):
-        """Save spoke configuration using direct file operations."""
-        try:
-            if not spoke_config or not isinstance(spoke_config, dict):
-                self.logger.error("Invalid spoke configuration provided")
-                return False
-                
-            # Update main configuration object
-            if 'spoke_distances' in spoke_config:
-                self.main_config.spoke_distances = spoke_config['spoke_distances']
-                self.main_config.max_spokes = spoke_config.get('max_spokes', len(spoke_config['spoke_distances']))
-                self.main_config.variable_spoke_count = spoke_config.get('variable_spoke_count', True)
-                
-                # Generate pair order
-                actual_spoke_count = len(spoke_config['spoke_distances'])
-                if actual_spoke_count > 0:
-                    pair_order = []
-                    for i in range(0, actual_spoke_count - 1, 2):
-                        if i + 1 < actual_spoke_count:
-                            pair_order.append((i, i + 1))
-                    
-                    if actual_spoke_count % 2 == 1:  # Odd number of spokes
-                        pair_order.append((actual_spoke_count - 1, 0))
-                    
-                    self.main_config.pair_order = pair_order
-                
-                # Save spoke config
-                self.main_config.spoke_config = spoke_config
-                
-                # Save to disk using the main config's save method
-                try:
-                    from cargosim.core.config import save_config
-                    save_config(self.main_config)
-                    self.logger.info("Spoke configuration saved successfully using ConfigurationManager")
-                    return True
-                except Exception as save_error:
-                    self.logger.warning(f"Could not save using save_config: {save_error}")
-                    
-                    # Fallback save
-                    return self._fallback_save(spoke_config)
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error saving spoke configuration: {e}")
-            return False
+# save_spoke_config method removed - now using core configuration manager
     
-    def _fallback_save(self, spoke_config):
-        """Fallback save method using direct file I/O."""
-        try:
-            import os
-            import json
-            
-            # Try to save to user config directory
-            config_file = os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'user', 'cargo_sim_config.json')
-            os.makedirs(os.path.dirname(config_file), exist_ok=True)
-            
-            # Create minimal configuration with spoke settings
-            minimal_config = {
-                "spoke_distances": spoke_config.get('spoke_distances', []),
-                "max_spokes": spoke_config.get('max_spokes', len(spoke_config.get('spoke_distances', []))),
-                "variable_spoke_count": spoke_config.get('variable_spoke_count', True),
-                "spoke_config": spoke_config
-            }
-            
-            with open(config_file, 'w', encoding='utf-8') as f:
-                json.dump(minimal_config, f, indent=2)
-            
-            self.logger.info("Configuration saved using fallback method")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Fallback save failed: {e}")
-            return False
+# _fallback_save method removed - now using core configuration manager
 
 
 class SpokeConfigurationPanel(ttk.Frame):
@@ -1715,7 +1642,15 @@ class SpokeConfigurationPanel(ttk.Frame):
     def __init__(self, parent, config_manager: AircraftConfigManager, configuration_manager=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.config_manager = config_manager
-        self.configuration_manager = configuration_manager  # Store ConfigurationManager reference
+        # Get the core configuration manager if none provided
+        if configuration_manager is None:
+            try:
+                from cargosim.core.configuration_manager import get_configuration_manager
+                self.configuration_manager = get_configuration_manager()
+            except ImportError:
+                self.configuration_manager = None
+        else:
+            self.configuration_manager = configuration_manager
         self.on_config_changed: Optional[Callable[[], None]] = None
         
         # Initialize instance variables
@@ -2240,49 +2175,27 @@ class SpokeConfigurationPanel(ttk.Frame):
                             # Save spoke config
                             parent.cfg.spoke_config = config
                             
-                            # Save to disk
+                            # Save to disk using the core configuration manager
+                            if self.configuration_manager:
+                                try:
+                                    success = self.configuration_manager.save_spoke_config(config)
+                                    if success:
+                                        logger.info("Configuration saved successfully using core configuration manager")
+                                        return True
+                                    else:
+                                        logger.warning("Core configuration manager save failed, trying fallback")
+                                except Exception as cm_error:
+                                    logger.warning(f"Core configuration manager error: {cm_error}, trying fallback")
+                            
+                            # Fallback: Save directly to disk
                             try:
-                                # Use absolute import - this should work from anywhere
                                 from cargosim.core.config import save_config
                                 save_config(parent.cfg)
-                                logger.info("Configuration saved successfully to disk")
+                                logger.info("Configuration saved successfully using fallback method")
                                 return True
-                            except ImportError as import_error:
-                                logger.warning(f"Could not import save_config: {import_error}")
-                                
-                                # Fallback: Save directly to JSON file
-                                try:
-                                    import os
-                                    import json
-                                    
-                                    # Get the config file path relative to the project root
-                                    current_file = os.path.abspath(__file__)
-                                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
-                                    config_file = os.path.join(project_root, 'configs', 'user', 'cargo_sim_config.json')
-                                    
-                                    # Ensure directory exists
-                                    os.makedirs(os.path.dirname(config_file), exist_ok=True)
-                                    
-                                    # Save configuration
-                                    if hasattr(parent.cfg, 'to_json'):
-                                        config_data = parent.cfg.to_json()
-                                    else:
-                                        config_data = {
-                                            'spoke_distances': config.get('spoke_distances', []),
-                                            'max_spokes': config.get('max_spokes', len(config.get('spoke_distances', []))),
-                                            'variable_spoke_count': config.get('variable_spoke_count', True),
-                                            'spoke_config': config
-                                        }
-                                    
-                                    with open(config_file, 'w', encoding='utf-8') as f:
-                                        json.dump(config_data, f, indent=2)
-                                    
-                                    logger.info(f"Configuration saved to {config_file}")
-                                    return True
-                                    
-                                except Exception as fallback_error:
-                                    logger.error(f"Fallback save failed: {fallback_error}")
-                                    return False
+                            except Exception as fallback_error:
+                                logger.error(f"Fallback save failed: {fallback_error}")
+                                return False
                         
                         break
                 except Exception:
@@ -2306,16 +2219,16 @@ class SpokeConfigurationPanel(ttk.Frame):
             config = self.get_config()
             logger.info(f"SAVING CONFIGURATION: {len(config.get('spoke_distances', []))} spokes")
             
-            # Use ConfigurationManager if available (most reliable method)
+            # Use core ConfigurationManager if available (most reliable method)
             if self.configuration_manager:
                 try:
                     success = self.configuration_manager.save_spoke_config(config)
                     if success:
-                        logger.info("Configuration saved using ConfigurationManager")
+                        logger.info("Configuration saved using core ConfigurationManager")
                     else:
-                        logger.warning("ConfigurationManager save failed, trying alternative methods")
+                        logger.warning("Core ConfigurationManager save failed, trying alternative methods")
                 except Exception as e:
-                    logger.warning(f"ConfigurationManager error: {e}, trying alternative methods")
+                    logger.warning(f"Core ConfigurationManager error: {e}, trying alternative methods")
             
             # Fallback: Always try to save directly to disk
             success = self.save_configuration_directly()

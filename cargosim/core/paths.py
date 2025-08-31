@@ -77,6 +77,14 @@ def get_user_config_path(filename: str) -> Path:
     """Get path to a user configuration file."""
     return USER_CONFIGS_DIR / filename
 
+def get_config_dir() -> Path:
+    """Get the default configuration directory."""
+    return DEFAULT_CONFIGS_DIR
+
+def get_user_config_dir() -> Path:
+    """Get the user configuration directory."""
+    return USER_CONFIGS_DIR
+
 def get_log_path(filename: str, log_type: str = "runtime") -> Path:
     """Get path to a log file."""
     if log_type == "debug":
