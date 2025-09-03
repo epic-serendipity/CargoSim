@@ -1659,6 +1659,10 @@ class SpokeConfigurationPanel(ttk.Frame):
         self.var_spoke_count = tk.BooleanVar(value=True)
         self.spoke_count_var = tk.IntVar(value=10)
         self._preview_update_id: Optional[str] = None
+        # Debounced configuration saving
+        self._save_after_id: Optional[str] = None
+        self._saving_config: bool = False
+        self._save_pending: bool = False
         
         # Track pending operations for cleanup
         self._pending_operations = set()
@@ -1671,6 +1675,53 @@ class SpokeConfigurationPanel(ttk.Frame):
         
         # Bind destroy event to clean up pending operations
         self.bind('<Destroy>', self._on_destroy)
+
+    def _schedule_config_save(self, delay: int = 150):
+        """Debounce configuration save operations to avoid save storms."""
+        try:
+            if self._save_after_id:
+                try:
+                    self.after_cancel(self._save_after_id)
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        self._pending_operations.discard(self._save_after_id)
+                    except Exception:
+                        pass
+                    self._save_after_id = None
+
+            self._save_after_id = self.after(delay, self._perform_config_save)
+            self._pending_operations.add(self._save_after_id)
+        except Exception as e:
+            logger.error(f"Error scheduling configuration save: {e}")
+
+    def _perform_config_save(self):
+        """Perform a single consolidated configuration save, coalescing rapid updates."""
+        # Clear the scheduled id since we're executing now
+        if self._save_after_id:
+            try:
+                self._pending_operations.discard(self._save_after_id)
+            except Exception:
+                pass
+            self._save_after_id = None
+
+        if self._saving_config:
+            # Another save is in progress; mark pending and try again shortly
+            self._save_pending = True
+            self._schedule_config_save(100)
+            return
+
+        self._saving_config = True
+        try:
+            self._save_config_to_fleet_builder()
+        except Exception as e:
+            logger.error(f"Error performing configuration save: {e}")
+        finally:
+            self._saving_config = False
+            if self._save_pending:
+                self._save_pending = False
+                self._schedule_config_save(100)
     
     def _get_theme_colors(self) -> dict:
         """Get current theme colors for the preview."""
@@ -1741,12 +1792,26 @@ class SpokeConfigurationPanel(ttk.Frame):
         
         ttk.Label(count_selector_frame, text="Number of Spokes:").pack(side="left")
         
-        self.spoke_count_spinner = ttk.Spinbox(count_selector_frame, 
-                                              from_=1, to=20, 
-                                              textvariable=self.spoke_count_var,
-                                              width=10,
-                                              command=self._on_spoke_count_changed)
+        self.spoke_count_spinner = ttk.Spinbox(
+            count_selector_frame,
+            from_=1,
+            to=20,
+            textvariable=self.spoke_count_var,
+            width=10,
+            command=self._on_spoke_count_changed,
+        )
         self.spoke_count_spinner.pack(side="left", padx=(8, 0))
+
+        # Ensure changes made by typing are also captured (not just arrow clicks)
+        try:
+            # Trace variable writes (fires on any value change)
+            self.spoke_count_var.trace('w', lambda *args: self._on_spoke_count_changed())
+            # Commit on Enter key and when focus leaves the widget
+            self.spoke_count_spinner.bind('<Return>', lambda e: self._on_spoke_count_changed())
+            self.spoke_count_spinner.bind('<FocusOut>', lambda e: self._on_spoke_count_changed())
+        except Exception:
+            # Be tolerant if running on older Tk versions
+            pass
         
         # Ensure spinner is enabled (since variable spoke count is always on)
         operation_id = self.after(100, self._update_spinner_state)
@@ -1952,7 +2017,7 @@ class SpokeConfigurationPanel(ttk.Frame):
                         self._pending_operations.add(operation_id)
                     else:
                         # Force update after max attempts
-                        logger.warning("Canvas size wait timeout, forcing preview update")
+                        logger.debug("Canvas size wait timeout, forcing preview update")
                         self._force_preview_update()
                         # Reset wait count after forcing update
                         self._canvas_wait_count = 0
@@ -2054,7 +2119,7 @@ class SpokeConfigurationPanel(ttk.Frame):
                         operation_id = self.after(delay, self._force_preview_update)
                         self._pending_operations.add(operation_id)
                     else:
-                        logger.warning("Force preview update retry limit reached")
+                        logger.debug("Force preview update retry limit reached")
                         self._force_update_count = 0
             else:
                 logger.warning("Preview canvas not available for force update")
@@ -2088,12 +2153,8 @@ class SpokeConfigurationPanel(ttk.Frame):
             # Since variable spoke count is always enabled, just ensure spinner is enabled
             self._update_spinner_state()
             
-            # Save configuration to fleet builder if available
-            self._save_config_to_fleet_builder()
-            # Ensure configuration is saved
-            self.save_configuration_directly()
-            # Also save directly to ensure persistence
-            self.save_configuration_directly()
+            # Schedule consolidated save instead of immediate multiple saves
+            self._schedule_config_save(150)
             
             # Notify configuration change
             if self.on_config_changed:
@@ -2124,6 +2185,14 @@ class SpokeConfigurationPanel(ttk.Frame):
                 except:
                     pass
             self._pending_operations.clear()
+
+            # Also cancel any pending save if tracked separately
+            try:
+                if getattr(self, '_save_after_id', None):
+                    self.after_cancel(self._save_after_id)
+                    self._save_after_id = None
+            except Exception:
+                pass
             
             logger.debug("Cleaned up pending operations on SpokeConfigurationPanel destruction")
         except Exception as e:
@@ -2148,65 +2217,59 @@ class SpokeConfigurationPanel(ttk.Frame):
                 except Exception as e:
                     logger.warning(f"ConfigurationManager error: {e}, trying fallback methods")
             
-            # Fallback: Try to find main GUI and update its configuration
-            parent = self.winfo_parent()
-            while parent:
+            # Fallback: Update the main GUI's cfg via toplevel back-reference if available
+            try:
+                toplevel = self.winfo_toplevel()
+                control_gui = getattr(toplevel, '_control_gui', None)
+            except Exception:
+                control_gui = None
+
+            if control_gui and hasattr(control_gui, 'cfg'):
                 try:
-                    if hasattr(parent, 'cfg'):
-                        # Update main configuration
-                        if 'spoke_distances' in config:
-                            parent.cfg.spoke_distances = config['spoke_distances']
-                            parent.cfg.max_spokes = config.get('max_spokes', len(config['spoke_distances']))
-                            parent.cfg.variable_spoke_count = config.get('variable_spoke_count', True)
-                            
-                            # Generate pair order
-                            actual_spoke_count = len(config['spoke_distances'])
-                            if actual_spoke_count > 0:
-                                pair_order = []
-                                for i in range(0, actual_spoke_count - 1, 2):
-                                    if i + 1 < actual_spoke_count:
-                                        pair_order.append((i, i + 1))
-                                
-                                if actual_spoke_count % 2 == 1:  # Odd number of spokes
-                                    pair_order.append((actual_spoke_count - 1, 0))
-                                
-                                parent.cfg.pair_order = pair_order
-                            
-                            # Save spoke config
-                            parent.cfg.spoke_config = config
-                            
-                            # Save to disk using the core configuration manager
-                            if self.configuration_manager:
-                                try:
-                                    success = self.configuration_manager.save_spoke_config(config)
-                                    if success:
-                                        logger.info("Configuration saved successfully using core configuration manager")
-                                        return True
-                                    else:
-                                        logger.warning("Core configuration manager save failed, trying fallback")
-                                except Exception as cm_error:
-                                    logger.warning(f"Core configuration manager error: {cm_error}, trying fallback")
-                            
-                            # Fallback: Save directly to disk
+                    if 'spoke_distances' in config:
+                        control_gui.cfg.spoke_distances = config['spoke_distances']
+                        control_gui.cfg.max_spokes = config.get('max_spokes', len(config['spoke_distances']))
+                        control_gui.cfg.variable_spoke_count = config.get('variable_spoke_count', True)
+
+                        # Generate pair order matching the current spoke count
+                        actual_spoke_count = len(config['spoke_distances'])
+                        if actual_spoke_count > 0:
+                            pair_order = []
+                            for i in range(0, actual_spoke_count - 1, 2):
+                                if i + 1 < actual_spoke_count:
+                                    pair_order.append((i, i + 1))
+                            if actual_spoke_count % 2 == 1:
+                                pair_order.append((actual_spoke_count - 1, 0))
+                            control_gui.cfg.pair_order = pair_order
+
+                        # Keep embedded spoke_config consistent
+                        control_gui.cfg.spoke_config = config
+
+                        # Save to disk using the core configuration manager when possible
+                        if self.configuration_manager:
                             try:
-                                from cargosim.core.config import save_config
-                                save_config(parent.cfg)
-                                logger.info("Configuration saved successfully using fallback method")
-                                return True
-                            except Exception as fallback_error:
-                                logger.error(f"Fallback save failed: {fallback_error}")
-                                return False
-                        
-                        break
-                except Exception:
-                    pass
-                
-                try:
-                    parent = parent.winfo_parent()
-                except Exception:
-                    break
-            
-            logger.warning("Could not find main GUI to save configuration")
+                                success = self.configuration_manager.save_spoke_config(config)
+                                if success:
+                                    logger.info("Configuration saved successfully using core configuration manager")
+                                    return True
+                                else:
+                                    logger.warning("Core configuration manager save failed, trying fallback")
+                            except Exception as cm_error:
+                                logger.warning(f"Core configuration manager error: {cm_error}, trying fallback")
+
+                        # Fallback: Save directly to disk
+                        try:
+                            from cargosim.core.config import save_config
+                            save_config(control_gui.cfg)
+                            logger.info("Configuration saved successfully using fallback method")
+                            return True
+                        except Exception as fallback_error:
+                            logger.error(f"Fallback save failed: {fallback_error}")
+                            return False
+                except Exception as update_error:
+                    logger.error(f"Failed to update main GUI configuration: {update_error}")
+
+            logger.warning("Could not reach main GUI to save configuration")
             return False
             
         except Exception as e:
@@ -2230,7 +2293,7 @@ class SpokeConfigurationPanel(ttk.Frame):
                 except Exception as e:
                     logger.warning(f"Core ConfigurationManager error: {e}, trying alternative methods")
             
-            # Fallback: Always try to save directly to disk
+            # Fallback: Try to save directly to disk once
             success = self.save_configuration_directly()
             if success:
                 logger.info("Configuration saved directly to disk")
@@ -2257,18 +2320,21 @@ class SpokeConfigurationPanel(ttk.Frame):
                 except Exception:
                     break
             
-            # Force a configuration reload to ensure changes take effect
+            # Reload configuration to verify persistence
             try:
                 # Use absolute imports - these should work from anywhere
-                from cargosim.core.config import load_config, save_config
+                from cargosim.core.config import load_config, save_config, repair_spoke_configuration
                 
                 # Reload configuration to ensure it's up to date
                 reloaded_cfg = load_config()
                 logger.info(f"Configuration reloaded: {len(reloaded_cfg.spoke_distances)} spokes")
                 
-                # If the reloaded config doesn't match what we just saved, force save it
+                # Normalize any inconsistencies before comparison
+                reloaded_cfg = repair_spoke_configuration(reloaded_cfg)
+                
+                # If the reloaded config doesn't match what we intended, force save once
                 if len(reloaded_cfg.spoke_distances) != len(config.get('spoke_distances', [])):
-                    logger.warning("Configuration mismatch detected, forcing save")
+                    logger.debug("Configuration mismatch detected during verification; applying corrective save")
                     reloaded_cfg.spoke_distances = config['spoke_distances']
                     reloaded_cfg.max_spokes = config.get('max_spokes', len(config['spoke_distances']))
                     reloaded_cfg.variable_spoke_count = config.get('variable_spoke_count', True)
@@ -2286,9 +2352,15 @@ class SpokeConfigurationPanel(ttk.Frame):
                         
                         reloaded_cfg.pair_order = pair_order
                     
-                    reloaded_cfg.spoke_config = config
+                    # Keep spoke_config in sync with primary fields
+                    reloaded_cfg.spoke_config = {
+                        **(reloaded_cfg.spoke_config or {}),
+                        'spoke_distances': config['spoke_distances'],
+                        'max_spokes': reloaded_cfg.max_spokes,
+                        'variable_spoke_count': reloaded_cfg.variable_spoke_count,
+                    }
                     save_config(reloaded_cfg)
-                    logger.info("Configuration force-saved after mismatch detection")
+                    logger.info("Configuration corrected and saved after verification mismatch")
                 
             except Exception as reload_error:
                 logger.warning(f"Could not reload configuration: {reload_error}")
@@ -2306,11 +2378,7 @@ class SpokeConfigurationPanel(ttk.Frame):
     def save_configuration(self):
         """Explicitly save the current configuration."""
         try:
-            self._save_config_to_fleet_builder()
-            # Ensure configuration is saved
-            self.save_configuration_directly()
-            # Also save directly to ensure persistence
-            self.save_configuration_directly()
+            self._schedule_config_save(100)
         except Exception as e:
             logger.error(f"Error saving configuration: {e}")
     
@@ -2363,9 +2431,9 @@ class SpokeConfigurationPanel(ttk.Frame):
                 if i < len(self.distance_vars):
                     self.distance_vars[i].set(distance)
             
-            # Now save the updated configuration
-            logger.info(f"Saving updated configuration with {new_count} spokes")
-            self._save_config_to_fleet_builder()
+            # Consolidate save
+            logger.info(f"Scheduling save for updated configuration with {new_count} spokes")
+            self._schedule_config_save(150)
             
             # Ensure preview is updated after spoke count change
             operation_id = self.after(150, self._force_preview_update)
@@ -2391,12 +2459,8 @@ class SpokeConfigurationPanel(ttk.Frame):
             
             self._update_preview()
             
-            # Save configuration to fleet builder if available
-            self._save_config_to_fleet_builder()
-            # Ensure configuration is saved
-            self.save_configuration_directly()
-            # Also save directly to ensure persistence
-            self.save_configuration_directly()
+            # Schedule consolidated configuration save
+            self._schedule_config_save(200)
             
             if self.on_config_changed:
                 self.on_config_changed()
