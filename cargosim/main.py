@@ -132,7 +132,7 @@ def run_sim(cfg: "SimConfig", *, force_windowed: bool = False):
     from tkinter import messagebox
 
     logger = get_logger("main.simulation")
-    log_runtime_event("Starting run_sim function", f"fleet={cfg.fleet_label}, periods={cfg.periods}, force_windowed={force_windowed}")
+    log_runtime_event("Starting run_sim function", f"fleet={cfg.fleet_label}, duration_minutes={getattr(cfg,'duration_minutes',0)}, force_windowed={force_windowed}")
     
     # Validate configuration before running
     log_runtime_event("Validating simulation configuration")
@@ -145,7 +145,7 @@ def run_sim(cfg: "SimConfig", *, force_windowed: bool = False):
     else:
         log_runtime_event("Configuration validation passed")
     
-    logger.info(f"Starting simulation with fleet: {cfg.fleet_label}, periods: {cfg.periods}")
+    logger.info(f"Starting simulation with fleet: {cfg.fleet_label}, duration_minutes: {getattr(cfg,'duration_minutes',0)}")
     
     # Initialize simulation and renderer variables
     sim = None
@@ -345,7 +345,16 @@ def render_offline(cfg: "SimConfig"):
             self.ac_colors = {k: hex2rgb(v) for k, v in self.sim.cfg.theme.ac_colors.items()}
             self.bar_cols = [self.tt.bar_A, self.tt.bar_B, self.tt.bar_C, self.tt.bar_D]
 
-            self.period_seconds = float(self.sim.cfg.period_seconds)
+            # Derive period duration from ticks per second
+            try:
+                tps = int(getattr(self.sim.cfg, 'ticks_per_second', 120))
+            except Exception:
+                tps = 120
+            if tps < 10:
+                tps = 10
+            elif tps > 500:
+                tps = 500
+            self.period_seconds = 1.0 / float(tps)
             self.paused = False
             from types import SimpleNamespace
             self.recorder = SimpleNamespace(live=True, frames_dropped=0, frame_idx=0)
@@ -376,14 +385,22 @@ def render_offline(cfg: "SimConfig"):
     recorder = Recorder.for_offline(file_path=out_file, fps=rc.offline_fps, fmt=fmt)
 
     try:
-        for period in range(cfg.periods):
+        total_minutes = int(getattr(cfg, 'duration_minutes', 60))
+        current_minute = 0
+        while current_minute < total_minutes:
             actions = sim.actions_log[-1] if sim.actions_log else []
             for f in range(frames_per_period):
                 alpha = (f + 1) / frames_per_period
                 rnd.recorder.frame_idx = recorder.frame_idx
                 rnd.render_frame(actions, alpha, with_overlays=True)
                 recorder.capture(rnd.surface)
-            sim.step_period()
+            # Advance by 1 minute in the simulation
+            step_fn = getattr(sim, 'step_time', None)
+            if callable(step_fn):
+                step_fn(1)
+            else:
+                sim.step_period()
+            current_minute += 1
         out_path = recorder.close()
         pg.quit()
         return out_path
@@ -403,7 +420,8 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
         apply_theme_preset(cfg.theme, name)
         if cfg.theme.ac_colorset:
             cfg.theme.ac_colors = AIRFRAME_COLORSETS[cfg.theme.ac_colorset]
-        cfg.periods = 2
+        # Keep a small duration for theme sweeps
+        cfg.duration_minutes = 2 * 60
         cfg.recording.frames_per_period = 1
         cfg.recording.record_live_format = "png"
         cfg.recording.offline_fmt = "png"
