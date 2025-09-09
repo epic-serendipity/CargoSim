@@ -1,6 +1,6 @@
 # CargoSim - Hub-and-Spoke Logistics Simulator
 
-A professional, modular Python package for simulating hub-and-spoke airlift networks with daily AM/PM cadence. Aircraft ferry supplies to spokes and operations consume resources.
+A professional, modular Python package for simulating hub-and-spoke airlift networks with a 24-hour clock down to the minute. Aircraft ferry supplies to spokes and operations consume resources.
 
 ## Quickstart
 
@@ -22,7 +22,7 @@ python -m cargosim
 python cargo_sim.py
 
 # Headless mode
-python -m cargosim --headless --periods 10 --seed 42
+python -m cargosim --headless --duration-minutes 600 --seed 42
 
 # Windowed mode
 python -m cargosim --windowed
@@ -50,10 +50,10 @@ cargosim/
 
 ## Core Concepts
 
-- **Periods**: Alternate AM/PM; arrivals apply at the next period
+- **Time**: Continuous 24-hour clock; simulation advances in minutes
 - **Operations**: Can run only when a spoke has A, B, C, and D resources on hand
 - **Resource Consumption**: Each operation consumes one unit of C and D
-- **Resource Gating**: A and B gate operations per PM but are not consumed
+- **Arrivals**: Cargo arrivals apply immediately on unloading
 
 ## Features
 
@@ -133,7 +133,7 @@ from cargosim import SimConfig, LogisticsSim, Aircraft, Renderer
 # Configuration
 cfg = SimConfig()
 cfg.fleet_label = "2xC130"
-cfg.periods = 60
+cfg.duration_minutes = 60 * 24
 
 # Simulation
 sim = LogisticsSim(cfg)
@@ -253,7 +253,7 @@ The temporary fleet system allows users to test custom fleets without saving the
 ```json
 {
   "fleet_label": "TEMP_2xCustom_Transport_1xC130",
-  "periods": 30
+  "duration_minutes": 30 * 24 * 60
 }
 ```
 
