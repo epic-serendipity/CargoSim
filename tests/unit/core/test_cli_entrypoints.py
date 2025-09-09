@@ -17,4 +17,4 @@ def test_python_m_cargosim(monkeypatch):
 
 
 def test_headless_exits_zero():
-    assert cm.headless(["--periods", "4", "--seed", "1"]) == 0
+    assert cm.headless(["--duration-minutes", "240", "--seed", "1"]) == 0

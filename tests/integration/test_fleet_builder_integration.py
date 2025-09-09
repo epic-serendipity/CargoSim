@@ -14,7 +14,7 @@ class TestFleetBuilderSimulationIntegration:
     def test_simulation_uses_fleet_builder_pallet(self):
         """Test that simulation uses Fleet Builder pallet contents."""
         cfg = SimConfig()
-        cfg.periods = 5  # Short simulation
+        cfg.duration_minutes = 300  # Short simulation
         
         # Mock the fleet builder to return a specific fleet
         mock_fleet = {"C-130": 2, "C-27": 1}
@@ -35,7 +35,7 @@ class TestFleetBuilderSimulationIntegration:
     def test_simulation_auto_adds_default_fleet_when_pallet_empty(self):
         """Test that simulation auto-adds default fleet when pallet is empty."""
         cfg = SimConfig()
-        cfg.periods = 5
+        cfg.duration_minutes = 300
         
         # Mock empty fleet
         mock_fleet = {}

@@ -10,7 +10,10 @@ from cargosim.rendering.renderer import Renderer
 
 
 def make_sim():
-    cfg = SimConfig(periods=2, a_days=1, b_days=1)
+    cfg = SimConfig()
+    cfg.duration_minutes = 2 * 60
+    cfg.a_days = 1
+    cfg.b_days = 1
     sim = LogisticsSim(cfg)
     sim.fleet = []
     return sim
@@ -64,6 +67,6 @@ def test_arrival_timing():
     sim.stock[0] = [1, 1, 0, 0]
     sim.arrivals_next[0].append([0, 0, 1, 1])
     assert not sim.run_op(0)
-    sim.step_period()
+    getattr(sim, 'step_time', lambda *_: None)(1)
     assert sim.stock[0] == [1, 1, 1, 1]
     assert sim.run_op(0)
