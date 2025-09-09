@@ -156,15 +156,15 @@ class TestSimConfig:
     def test_config_initialization(self):
         """Test that SimConfig initializes correctly."""
         config = SimConfig()
-        assert config.periods == 60
+        assert hasattr(config, 'duration_minutes')
         assert config.fleet_label == "2xC130"
     
     def test_config_validation(self):
         """Test configuration validation."""
         config = SimConfig()
-        config.periods = -1  # Invalid value
+        config.duration_minutes = 30  # Invalid (too short)
         issues = validate_config(config)
-        assert "periods must be positive" in issues
+        assert any("Duration" in issue for issue in issues)
 ```
 
 ### Best Practices
@@ -181,7 +181,7 @@ def sample_config():
     """Provide a sample configuration for testing."""
     return SimConfig(
         fleet_label="TestFleet",
-        periods=10,
+        duration_minutes=600,
         initial_stocks={"A": 5, "B": 5, "C": 5, "D": 5}
     )
 

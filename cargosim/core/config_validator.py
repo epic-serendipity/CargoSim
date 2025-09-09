@@ -114,7 +114,10 @@ class ConfigValidator:
         self.sim_validation_rules = {
             "config_version": {"type": int, "min": 9, "max": 20},
             "fleet_label": {"type": str, "required": True},
+            # Legacy: periods (deprecated)
             "periods": {"type": int, "min": 1, "max": 1000},
+            # New: duration_minutes preferred
+            "duration_minutes": {"type": int, "min": 60, "max": 365*24*60},
             "spoke_distances": {"type": list, "min_length": 5, "max_length": 20},
             "variable_spoke_count": {"type": bool},
             "max_spokes": {"type": int, "min": 5, "max": 20},

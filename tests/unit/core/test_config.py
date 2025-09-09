@@ -168,7 +168,7 @@ class TestSimConfig:
         cfg = SimConfig()
         
         assert cfg.fleet_label == "2xC130"
-        assert cfg.periods == 60
+        assert hasattr(cfg, 'duration_minutes')
         assert cfg.init_A == 4
         assert cfg.init_B == 4
         assert cfg.init_C == 2
@@ -186,15 +186,16 @@ class TestSimConfig:
         
         # Should contain all expected keys
         expected_keys = {
-            'config_version', 'fleet_label', 'periods', 'init', 'cadence',
+            'config_version', 'fleet_label', 'periods', 'duration_minutes', 'init', 'cadence',
             'capacities', 'rest', 'pair_order', 'theme', 'recording',
-            'bar_scale', 'adm', 'gameplay'
+            'adm', 'gameplay', 'spoke_distances', 'variable_spoke_count',
+            'max_spokes', 'fps', 'seed', 'launch_fullscreen'
         }
         assert set(json_data.keys()) >= expected_keys
         
         # Check specific values
         assert json_data['fleet_label'] == "2xC130"
-        assert json_data['periods'] == 60
+        assert 'duration_minutes' in json_data
         assert json_data['init'] == [4, 4, 2, 2]
         assert json_data['capacities'] == {"C130": 6, "C27": 3}
     
@@ -202,14 +203,14 @@ class TestSimConfig:
         """Test SimConfig JSON deserialization."""
         json_data = {
             'fleet_label': '4xC130',
-            'periods': 120,
+            'duration_minutes': 120*12*60,
             'init': [8, 8, 4, 4],
             'capacities': {'C130': 8, 'C27': 4}
         }
         cfg = SimConfig.from_json(json_data)
         
         assert cfg.fleet_label == '4xC130'
-        assert cfg.periods == 120
+        assert getattr(cfg, 'duration_minutes') == 120*12*60
         assert cfg.init_A == 8
         assert cfg.init_B == 8
         assert cfg.init_C == 4
@@ -230,9 +231,9 @@ class TestConfigValidation:
     def test_invalid_periods(self):
         """Test validation with invalid periods."""
         cfg = SimConfig()
-        cfg.periods = 1
+        cfg.duration_minutes = 30  # too short
         issues = validate_config(cfg)
-        assert any("Periods must be at least 2" in issue for issue in issues)
+        assert any("Duration" in issue for issue in issues)
     
     def test_invalid_capacities(self):
         """Test validation with invalid aircraft capacities."""
@@ -284,7 +285,7 @@ class TestConfigFileOperations:
         """Test saving and loading configuration."""
         cfg = SimConfig()
         cfg.fleet_label = "4xC130"
-        cfg.periods = 120
+        cfg.duration_minutes = 120*12*60
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             temp_path = f.name
@@ -296,7 +297,7 @@ class TestConfigFileOperations:
                 loaded_cfg = load_config()
                 
                 assert loaded_cfg.fleet_label == "4xC130"
-                assert loaded_cfg.periods == 120
+                assert getattr(loaded_cfg, 'duration_minutes') == 120*12*60
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)

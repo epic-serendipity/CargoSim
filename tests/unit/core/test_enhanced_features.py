@@ -18,8 +18,8 @@ def test_enhanced_features():
         
         # Create a simple configuration
         cfg = SimConfig()
-        cfg.periods = 10
-        cfg.period_seconds = 1.0
+        cfg.duration_minutes = 600
+        cfg.period_seconds = 0.1
         cfg.frames_per_period = 10
         cfg.fleet_label = "2xC130"
         

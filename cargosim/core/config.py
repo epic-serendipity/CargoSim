@@ -1990,7 +1990,11 @@ class BarScale:
 class SimConfig:
     config_version: int = CONFIG_VERSION
     fleet_label: str = "2xC130"       # "2xC130", "4xC130", "2xC130_2xC27"
-    periods: int = 60                 # 30 days (AM/PM)
+    periods: int = 60                 # 30 days (AM/PM) [legacy]
+    # New minute-based simulation duration (preferred over periods). Default = 30 days.
+    duration_minutes: int = 30 * 24 * 60
+    # How often the scheduler plans new sorties, in simulated minutes (default: 60 minutes)
+    schedule_interval_minutes: int = 60
     init_A: int = 4
     init_B: int = 4
     init_C: int = 2
@@ -2004,7 +2008,10 @@ class SimConfig:
     rest_c130: int = 6
     rest_c27: int = 12
     pair_order: List[Tuple[int,int]] = field(default_factory=lambda: copy.deepcopy(PAIR_ORDER_DEFAULT))
+    # Deprecated: use ticks_per_second; kept for backward compatibility
     period_seconds: float = 1.0
+    # New timing control: ticks per second (10..500), default 120
+    ticks_per_second: int = 120
     show_aircraft_labels: bool = False
     unlimited_storage: bool = True
     debug_mode: bool = False
@@ -2056,13 +2063,19 @@ class SimConfig:
         return {
             "config_version": self.config_version,
             "fleet_label": self.fleet_label,
+            # Keep legacy periods for backward compatibility
             "periods": self.periods,
+            # New minute-based duration
+            "duration_minutes": self.duration_minutes,
+            "schedule_interval_minutes": self.schedule_interval_minutes,
             "init": [self.init_A, self.init_B, self.init_C, self.init_D],
             "cadence": [self.a_days, self.b_days, self.c_days, self.d_days],
             "capacities": {"C130": self.cap_c130, "C27": self.cap_c27},
             "rest": {"C130": self.rest_c130, "C27": self.rest_c27},
             "pair_order": self.pair_order,
-            "period_seconds": self.period_seconds,
+            # Write both for backward compatibility
+            "ticks_per_second": int(self.ticks_per_second),
+            "period_seconds": float(1.0 / max(1, int(self.ticks_per_second))),
             "show_aircraft_labels": self.show_aircraft_labels,
             "unlimited_storage": self.unlimited_storage,
             "debug_mode": self.debug_mode,
@@ -2105,6 +2118,15 @@ class SimConfig:
         cfg.config_version = int(d.get("config_version", cfg.config_version))
         cfg.fleet_label = d.get("fleet_label", cfg.fleet_label)
         cfg.periods = int(d.get("periods", cfg.periods))
+        # Prefer duration_minutes when available; otherwise, derive from legacy periods (12h per period)
+        if "duration_minutes" in d:
+            cfg.duration_minutes = int(d.get("duration_minutes", cfg.duration_minutes))
+        else:
+            try:
+                cfg.duration_minutes = int(cfg.periods * 12 * 60)
+            except Exception:
+                cfg.duration_minutes = 30 * 24 * 60
+        cfg.schedule_interval_minutes = int(d.get("schedule_interval_minutes", cfg.schedule_interval_minutes))
         init = d.get("init", [cfg.init_A, cfg.init_B, cfg.init_C, cfg.init_D])
         cfg.init_A, cfg.init_B, cfg.init_C, cfg.init_D = [int(x) for x in init]
         cadence = d.get("cadence", [cfg.a_days, cfg.b_days, cfg.c_days, cfg.d_days])
@@ -2116,7 +2138,23 @@ class SimConfig:
         cfg.rest_c130 = int(rest.get("C130", cfg.rest_c130))
         cfg.rest_c27 = int(rest.get("C27", cfg.rest_c27))
         cfg.pair_order = [tuple(x) for x in d.get("pair_order", cfg.pair_order)]
-        cfg.period_seconds = float(d.get("period_seconds", cfg.period_seconds))
+        # Prefer ticks_per_second. If absent, derive from legacy period_seconds.
+        if "ticks_per_second" in d:
+            try:
+                cfg.ticks_per_second = int(d.get("ticks_per_second", cfg.ticks_per_second))
+            except Exception:
+                cfg.ticks_per_second = 120
+        else:
+            try:
+                ps = float(d.get("period_seconds", cfg.period_seconds))
+                if ps > 0:
+                    cfg.ticks_per_second = int(max(10, min(500, round(1.0 / ps))))
+                else:
+                    cfg.ticks_per_second = 120
+            except Exception:
+                cfg.ticks_per_second = 120
+        # Keep legacy field coherent for any legacy consumers
+        cfg.period_seconds = 1.0 / max(1, int(cfg.ticks_per_second))
         cfg.show_aircraft_labels = bool(d.get("show_aircraft_labels", cfg.show_aircraft_labels))
         cfg.unlimited_storage = bool(d.get("unlimited_storage", cfg.unlimited_storage))
         cfg.debug_mode = bool(d.get("debug_mode", cfg.debug_mode))
@@ -2179,8 +2217,8 @@ def validate_config(cfg: SimConfig) -> List[str]:
     issues = []
     
     # Basic validation
-    if cfg.periods < 2:
-        issues.append("Periods must be at least 2")
+    if cfg.duration_minutes < 60:
+        issues.append("Duration must be at least 60 minutes")
     
     if cfg.cap_c130 < 1 or cfg.cap_c27 < 1:
         issues.append("Aircraft capacities must be positive")
@@ -2194,8 +2232,11 @@ def validate_config(cfg: SimConfig) -> List[str]:
     if cfg.init_A < 0 or cfg.init_B < 0 or cfg.init_C < 0 or cfg.init_D < 0:
         issues.append("Initial stocks cannot be negative")
     
-    if cfg.period_seconds <= 0:
-        issues.append("Period duration must be positive")
+    # Ticks per second validation (10..500)
+    if cfg.ticks_per_second < 10 or cfg.ticks_per_second > 500:
+        issues.append("Ticks per second must be between 10 and 500")
+    if cfg.schedule_interval_minutes <= 0:
+        issues.append("Schedule interval must be positive minutes")
     
     # Recording config validation
     if hasattr(cfg, 'recording') and hasattr(cfg.recording, 'fps'):
@@ -2275,8 +2316,10 @@ def repair_spoke_configuration(cfg: SimConfig) -> SimConfig:
         variable_spoke_count = cfg.spoke_config.get('variable_spoke_count', False)
         
         if spoke_distances and len(spoke_distances) != cfg.max_spokes:
-            print(f"Repairing inconsistent configuration: main has {cfg.max_spokes} spokes, "
-                  f"spoke_config has {len(spoke_distances)} spokes")
+            import logging
+            logging.getLogger("cargosim.core.config").info(
+                f"Repairing inconsistent configuration: main has {cfg.max_spokes} spokes, "
+                f"spoke_config has {len(spoke_distances)} spokes")
             
             # Update main configuration to match spoke_config
             cfg.spoke_distances = spoke_distances
@@ -2290,7 +2333,8 @@ def repair_spoke_configuration(cfg: SimConfig) -> SimConfig:
                 if actual_spoke_count % 2 == 1:  # Odd number of spokes
                     cfg.pair_order.append((actual_spoke_count-1, 0))  # Connect last spoke to hub
                 
-                print(f"Repaired configuration: {actual_spoke_count} spokes, {len(cfg.pair_order)} pairs")
+                logging.getLogger("cargosim.core.config").info(
+                    f"Repaired configuration: {actual_spoke_count} spokes, {len(cfg.pair_order)} pairs")
         
         return cfg
 

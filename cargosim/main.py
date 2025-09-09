@@ -1,20 +1,26 @@
-"""Main entry points for CargoSim."""
+"""Main entry points for CargoSim.
+
+Refactored to minimize import-time cost by deferring heavy imports
+(tkinter, pygame, rendering/UI) until they are actually used.
+"""
 
 import os
+import warnings
 import subprocess
 import sys
-import tkinter as tk
-from tkinter import messagebox
 import argparse
+from typing import TYPE_CHECKING
 
-from cargosim.core.config import SimConfig, load_config, save_config, validate_config
-from cargosim.core.simulation import LogisticsSim
-from cargosim.rendering.renderer import Renderer
-from cargosim.ui.gui import ControlGUI
-from cargosim.core.utils import setup_logging, get_logger, setup_runtime_logging, log_runtime_event, log_exception
-from cargosim.core.error_handler import get_error_handler, handle_error, error_handler_decorator
-from cargosim.core.font_error_suppressor import get_font_limiter, install_font_error_limiting
-from cargosim.core.stderr_filter import install_stderr_limiter, get_stderr_limiter
+# Suppress upstream deprecation warning from pygame regarding pkg_resources
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API",
+    category=UserWarning,
+    module=r"pygame\.pkgdata"
+)
+
+if TYPE_CHECKING:
+    from cargosim.core.config import SimConfig  # type: ignore
 
 
 def _pip_install(pkgs: list[str]) -> bool:
@@ -23,12 +29,15 @@ def _pip_install(pkgs: list[str]) -> bool:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade"] + pkgs)
         return True
     except Exception as e:
+        from tkinter import messagebox  # defer tkinter
         messagebox.showerror("Install Failed", f"Failed to install: {' '.join(pkgs)}\n{e}")
         return False
 
 
-def check_and_offer_installs(startup_root: tk.Tk):
+def check_and_offer_installs(startup_root):
     """Ask user to install missing dependencies."""
+    from cargosim.core.utils import get_logger, log_runtime_event
+    from tkinter import messagebox
     logger = get_logger("main.dependencies")
     log_runtime_event("Starting dependency check and install process")
     
@@ -114,10 +123,16 @@ def check_and_offer_installs(startup_root: tk.Tk):
     log_runtime_event("Dependency check and install process completed")
 
 
-def run_sim(cfg: SimConfig, *, force_windowed: bool = False):
+def run_sim(cfg: "SimConfig", *, force_windowed: bool = False):
     """Run the simulation with the given configuration."""
+    from cargosim.core.utils import get_logger, log_runtime_event, log_exception
+    from cargosim.core.config import validate_config, save_config
+    from cargosim.core.simulation import LogisticsSim
+    from cargosim.rendering.renderer import Renderer
+    from tkinter import messagebox
+
     logger = get_logger("main.simulation")
-    log_runtime_event("Starting run_sim function", f"fleet={cfg.fleet_label}, periods={cfg.periods}, force_windowed={force_windowed}")
+    log_runtime_event("Starting run_sim function", f"fleet={cfg.fleet_label}, duration_minutes={getattr(cfg,'duration_minutes',0)}, force_windowed={force_windowed}")
     
     # Validate configuration before running
     log_runtime_event("Validating simulation configuration")
@@ -130,7 +145,7 @@ def run_sim(cfg: SimConfig, *, force_windowed: bool = False):
     else:
         log_runtime_event("Configuration validation passed")
     
-    logger.info(f"Starting simulation with fleet: {cfg.fleet_label}, periods: {cfg.periods}")
+    logger.info(f"Starting simulation with fleet: {cfg.fleet_label}, duration_minutes: {getattr(cfg,'duration_minutes',0)}")
     
     # Initialize simulation and renderer variables
     sim = None
@@ -235,6 +250,8 @@ def run_sim(cfg: SimConfig, *, force_windowed: bool = False):
 def keep_window_open(renderer):
     """Keep the pygame window open after simulation completion until user closes it."""
     try:
+        from cargosim.core.utils import log_runtime_event, log_exception
+        import pygame
         log_runtime_event("Starting keep_window_open function")
         
         # Create a simple event loop to keep the window responsive
@@ -276,7 +293,7 @@ def keep_window_open(renderer):
             pass
 
 
-def render_offline(cfg: SimConfig):
+def render_offline(cfg: "SimConfig"):
     """Render a video directly from current config without interactive playback."""
     # Only import pygame when actually needed for offline rendering
     try:
@@ -299,6 +316,8 @@ def render_offline(cfg: SimConfig):
         w, h = rc.record_custom_width, rc.record_custom_height
 
     # Build sim and a faux renderer that draws onto our surface without display
+    from cargosim.rendering.renderer import Renderer
+    from cargosim.core.simulation import LogisticsSim
     class Headless(Renderer):
         def __init__(self, sim, width, height):
             # Call parent constructor but don't initialize pygame yet
@@ -326,7 +345,16 @@ def render_offline(cfg: SimConfig):
             self.ac_colors = {k: hex2rgb(v) for k, v in self.sim.cfg.theme.ac_colors.items()}
             self.bar_cols = [self.tt.bar_A, self.tt.bar_B, self.tt.bar_C, self.tt.bar_D]
 
-            self.period_seconds = float(self.sim.cfg.period_seconds)
+            # Derive period duration from ticks per second
+            try:
+                tps = int(getattr(self.sim.cfg, 'ticks_per_second', 120))
+            except Exception:
+                tps = 120
+            if tps < 10:
+                tps = 10
+            elif tps > 500:
+                tps = 500
+            self.period_seconds = 1.0 / float(tps)
             self.paused = False
             from types import SimpleNamespace
             self.recorder = SimpleNamespace(live=True, frames_dropped=0, frame_idx=0)
@@ -357,14 +385,22 @@ def render_offline(cfg: SimConfig):
     recorder = Recorder.for_offline(file_path=out_file, fps=rc.offline_fps, fmt=fmt)
 
     try:
-        for period in range(cfg.periods):
+        total_minutes = int(getattr(cfg, 'duration_minutes', 60))
+        current_minute = 0
+        while current_minute < total_minutes:
             actions = sim.actions_log[-1] if sim.actions_log else []
             for f in range(frames_per_period):
                 alpha = (f + 1) / frames_per_period
                 rnd.recorder.frame_idx = recorder.frame_idx
                 rnd.render_frame(actions, alpha, with_overlays=True)
                 recorder.capture(rnd.surface)
-            sim.step_period()
+            # Advance by 1 minute in the simulation
+            step_fn = getattr(sim, 'step_time', None)
+            if callable(step_fn):
+                step_fn(1)
+            else:
+                sim.step_period()
+            current_minute += 1
         out_path = recorder.close()
         pg.quit()
         return out_path
@@ -377,14 +413,15 @@ def render_offline(cfg: SimConfig):
 def theme_sweep(out_dir: str = "_theme_sweep"):
     """Generate theme preview images."""
     os.makedirs(out_dir, exist_ok=True)
-    from cargosim.core.config import THEME_PRESETS, AIRFRAME_COLORSETS
+    from cargosim.core.config import THEME_PRESETS, AIRFRAME_COLORSETS, SimConfig
     for name in THEME_PRESETS.keys():
         cfg = SimConfig()
         from cargosim.core.config import apply_theme_preset
         apply_theme_preset(cfg.theme, name)
         if cfg.theme.ac_colorset:
             cfg.theme.ac_colors = AIRFRAME_COLORSETS[cfg.theme.ac_colorset]
-        cfg.periods = 2
+        # Keep a small duration for theme sweeps
+        cfg.duration_minutes = 2 * 60
         cfg.recording.frames_per_period = 1
         cfg.recording.record_live_format = "png"
         cfg.recording.offline_fmt = "png"
@@ -413,9 +450,17 @@ def theme_sweep(out_dir: str = "_theme_sweep"):
     logger.info(f"Theme sweep output written to {out_dir}")
 
 
-@error_handler_decorator(context="main function", severity="ERROR")
 def main(*, force_windowed: bool = False):
     """Main entry point for the GUI."""
+    # Import heavy modules only when launching GUI
+    from cargosim.core.utils import setup_runtime_logging, log_runtime_event
+    from cargosim.core.error_handler import get_error_handler
+    from cargosim.core.font_error_suppressor import get_font_limiter
+    from cargosim.core.stderr_filter import get_stderr_limiter
+    from cargosim.core.config import load_config
+    from cargosim.ui.gui import ControlGUI
+    import tkinter as tk
+
     # Setup runtime logging at the start of main()
     runtime_logger = setup_runtime_logging()
     log_runtime_event("Starting CargoSim main function", f"force_windowed={force_windowed}")
@@ -474,6 +519,11 @@ def main(*, force_windowed: bool = False):
 
 if __name__ == "__main__":
     # Setup runtime logging at startup
+    from cargosim.core.utils import setup_runtime_logging, log_runtime_event, log_exception
+    from cargosim.core.error_handler import get_error_handler, handle_error
+    from cargosim.core.font_error_suppressor import get_font_limiter
+    from cargosim.core.stderr_filter import get_stderr_limiter
+    from cargosim.core.config import load_config
     runtime_logger = setup_runtime_logging()
     log_runtime_event("CargoSim startup initiated", f"argv={sys.argv}")
     

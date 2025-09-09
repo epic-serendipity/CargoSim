@@ -609,8 +609,23 @@ class ConfigurationManager:
                 if 'variable_spoke_count' in spoke_config:
                     self._config_cache.variable_spoke_count = spoke_config['variable_spoke_count']
                 
-                if 'spoke_config' in spoke_config:
-                    self._config_cache.spoke_config = spoke_config['spoke_config']
+                # Keep embedded spoke_config consistent to prevent repair from reverting changes
+                try:
+                    current_sc = getattr(self._config_cache, 'spoke_config', {}) or {}
+                    updated_sc = {
+                        **current_sc,
+                        'spoke_distances': getattr(self._config_cache, 'spoke_distances', []),
+                        'max_spokes': getattr(self._config_cache, 'max_spokes', 0),
+                        'variable_spoke_count': getattr(self._config_cache, 'variable_spoke_count', True),
+                    }
+                    self._config_cache.spoke_config = updated_sc
+                except Exception:
+                    # If anything goes wrong, at least set a minimal spoke_config
+                    self._config_cache.spoke_config = {
+                        'spoke_distances': getattr(self._config_cache, 'spoke_distances', []),
+                        'max_spokes': getattr(self._config_cache, 'max_spokes', 0),
+                        'variable_spoke_count': getattr(self._config_cache, 'variable_spoke_count', True),
+                    }
                 
                 # Generate pair order if needed
                 if hasattr(self._config_cache, 'spoke_distances') and self._config_cache.spoke_distances:

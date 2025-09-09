@@ -63,12 +63,12 @@ def test_custom_aircraft_graphics():
     # Create a simulation configuration
     config = SimConfig()
     config.fleet_label = "Custom Fleet"
-    config.periods = 20  # Short simulation to see the graphics
+    config.duration_minutes = 20 * 60  # Short simulation to see the graphics
     
     # Fleet preset system removed - fleet will use Fleet Builder pallet
     
     print(f"Starting simulation with fleet: {config.fleet_label}")
-    print(f"Simulation periods: {config.periods}")
+    print(f"Simulation duration (min): {config.duration_minutes}")
     print("\nLook for the diamond-shaped custom aircraft with purple borders and glow effects!")
     print("Custom aircraft will be larger and have unique visual indicators.")
     
