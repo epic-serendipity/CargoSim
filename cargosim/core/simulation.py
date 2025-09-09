@@ -6,14 +6,15 @@ import math
 import random
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import List, Tuple, Optional
 
-from cargosim.core.config import M, PAIR_ORDER_DEFAULT, A_PERIOD_DAYS_DFLT, B_PERIOD_DAYS_DFLT, C_PERIOD_DAYS_DFLT, D_PERIOD_DAYS_DFLT, DEFAULT_BAR_SCALE_DENOMINATORS
-from cargosim.core.config import SimConfig
+from cargosim.core.config import (
+    M,
+    SimConfig,
+)
 from cargosim.features.smart_targeting import SmartTargeting, TargetingConfig
 
 
-def _row_to_spoke(row: List[float]) -> SimpleNamespace:
+def _row_to_spoke(row: list[float]) -> SimpleNamespace:
     return SimpleNamespace(A=row[0], B=row[1], C=row[2], D=row[3])
 
 
@@ -29,9 +30,9 @@ class Aircraft:
     name: str
     location: str = "HUB"  # "HUB" or "S{1..10}"
     state: str = "IDLE"    # IDLE, LEG1_ENROUTE, AT_SPOKEA, AT_SPOKEB_ENROUTE, AT_SPOKEB, RETURN_ENROUTE
-    plan: Optional[Tuple[int, Optional[int]]] = None  # (i, j|None)
-    payload_A: List[int] = field(default_factory=lambda: [0,0,0,0])
-    payload_B: List[int] = field(default_factory=lambda: [0,0,0,0])
+    plan: tuple[int, int | None] | None = None  # (i, j|None)
+    payload_A: list[int] = field(default_factory=lambda: [0,0,0,0])
+    payload_B: list[int] = field(default_factory=lambda: [0,0,0,0])
     active_periods: int = 0
     rest_cooldown: int = 0
     
@@ -46,6 +47,10 @@ class Aircraft:
     time_remaining: float = 0.0  # Remaining time for current state (ENROUTE, LOADING, MAINTENANCE)
     loading_time_remaining: float = 0.0  # Remaining loading/unloading time
     maintenance_time_remaining: float = 0.0  # Remaining maintenance time
+    
+    # Minute-based duty/rest tracking
+    duty_minutes: int = 0
+    rest_until_minute: int = 0
 
     def max_active_before_rest(self, cfg: SimConfig) -> int:
         return cfg.rest_c130 if self.typ == "C-130" else cfg.rest_c27
@@ -66,13 +71,19 @@ class Aircraft:
         """Reset current flight time after mission completion."""
         self.current_flight_time = 0.0
 
-    def set_enroute_state(self, flight_time_hours: float) -> None:
-        """Set aircraft to ENROUTE state with specified flight time.
+    def set_enroute_state(self, flight_time_hours: float, phase: str | None = None) -> None:
+        """Set aircraft to appropriate ENROUTE state with specified flight time.
         
         Args:
             flight_time_hours: Total flight time for this leg in hours
+            phase: 'LEG1' | 'LEG2' | 'RETURN' (defaults to 'LEG1' when None)
         """
-        self.state = "ENROUTE"
+        if phase == "LEG2":
+            self.state = "AT_SPOKEB_ENROUTE"
+        elif phase == "RETURN":
+            self.state = "RETURN_ENROUTE"
+        else:
+            self.state = "LEG1_ENROUTE"
         self.time_remaining = flight_time_hours
     
     def set_loading_state(self, loading_time_hours: float) -> None:
@@ -95,7 +106,14 @@ class Aircraft:
     
     def is_time_based_state(self) -> bool:
         """Check if aircraft is in a time-based state."""
-        return self.state in ["ENROUTE", "LOADING", "MAINTENANCE"]
+        return self.state in [
+            "ENROUTE",
+            "LEG1_ENROUTE",
+            "AT_SPOKEB_ENROUTE",
+            "RETURN_ENROUTE",
+            "LOADING",
+            "MAINTENANCE",
+        ]
     
     def update_time_remaining(self, delta_hours: float) -> bool:
         """Update remaining time for current state.
@@ -106,7 +124,7 @@ class Aircraft:
         Returns:
             True if state transition should occur, False otherwise
         """
-        if self.state == "ENROUTE":
+        if self.state in ("ENROUTE", "LEG1_ENROUTE", "AT_SPOKEB_ENROUTE", "RETURN_ENROUTE"):
             self.time_remaining = max(0.0, self.time_remaining - delta_hours)
             return self.time_remaining <= 0.0
         elif self.state == "LOADING":
@@ -137,6 +155,15 @@ class LogisticsSim:
         self.B_PERIOD_DAYS = cfg.b_days
         self.C_PERIOD_DAYS = cfg.c_days
         self.D_PERIOD_DAYS = cfg.d_days
+        # Op consumption thresholds (derived from cadence UI; defaults safe)
+        try:
+            self.MIN_C_PER_OP = max(1, int(getattr(cfg, 'c_days', 1)))
+        except Exception:
+            self.MIN_C_PER_OP = 1
+        try:
+            self.MIN_D_PER_OP = max(1, int(getattr(cfg, 'd_days', 1)))
+        except Exception:
+            self.MIN_D_PER_OP = 1
         # Use configurable bar scale denominators instead of hardcoded VIS_CAPS
         self.bar_scale = cfg.bar_scale
 
@@ -162,18 +189,22 @@ class LogisticsSim:
         self.reset_world()
 
     def reset_world(self):
-        self.t = 0  # current period
-        self.day = 0
-        self.half = "AM"  # AM for even t, PM for odd t
+        self.t = 0  # legacy period counter (derived)
+        self.day = 0  # day counter
+        self.half = "AM"  # legacy field; kept for compatibility
         
         # Time-based movement system
         self.current_time_hours: float = 0.0  # Current simulation time in hours
+        self._last_schedule_minute: int = -getattr(self.cfg, 'schedule_interval_minutes', 12*60)
+        # 12-hour cadence tick (first tick at +12h)
+        self._next_ops_tick_minute: int = 12 * 60
+        self._pending_actions: list[tuple[str, str]] = []
         
         # Cost tracking system
         self.total_operational_cost: float = 0.0
         self.total_fuel_cost: float = 0.0
         self.total_maintenance_cost: float = 0.0
-        self.cost_history: List[dict] = []  # Cost history for analysis
+        self.cost_history: list[dict] = []  # Cost history for analysis
         
         self.stock = [[self.cfg.init_A, self.cfg.init_B, self.cfg.init_C, self.cfg.init_D] for _ in range(self.M)]
         # Initialize operational flags based on initial stock levels
@@ -181,16 +212,16 @@ class LogisticsSim:
         self.arrivals_next = [[] for _ in range(self.M)]
         self.pair_cursor = 0
         self.fleet = self.build_fleet(self.cfg.fleet_label)
-        self.actions_log: List[List[Tuple[str,str]]] = []
+        self.actions_log: list[list[tuple[str,str]]] = []
 
         # Stats
         self.ops_by_spoke = [0]*self.M  # counts of OFFLOAD occurrences per spoke
         self.ops_total_history = [0]
-        self.integrity_violations: List[str] = []
+        self.integrity_violations: list[str] = []
         self._integrity_logged = False
 
         # History for rewind
-        self.history: List[dict] = []
+        self.history: list[dict] = []
         self.push_snapshot()  # store initial state (period 0 before any action)
         
         # Initialize smart targeting positions if available
@@ -230,20 +261,52 @@ class LogisticsSim:
     def can_run_op(self, s: int) -> bool:
         return is_ops_capable(_row_to_spoke(self.stock[s]))
 
+    def ops_count(self) -> int:
+        """Count how many spokes are currently operational."""
+        try:
+            return sum(1 for flag in self.op if flag)
+        except Exception:
+            return 0
+
     def run_op(self, s: int, amount: int = 1) -> bool:
         if not is_ops_capable(_row_to_spoke(self.stock[s])):
             return False
-        # Immediately consume C and D resources when operation is launched
-        self.stock[s][2] = max(0.0, self.stock[s][2] - amount)
-        self.stock[s][3] = max(0, self.stock[s][3] - amount)
+        # Consume only C and D resources per operation (amount ops)
+        self.stock[s][2] = max(0.0, self.stock[s][2] - float(amount))
+        self.stock[s][3] = max(0.0, self.stock[s][3] - float(amount))
         # Increment operation counter
         self.ops_by_spoke[s] += amount
-        
+        # Refresh operational flag based on updated stock
+        try:
+            self.op[s] = is_ops_capable(_row_to_spoke(self.stock[s]))
+        except Exception:
+            pass
         # Apply special capability effects
         for aircraft in self.fleet:
             if aircraft.location == f"S{s}" or aircraft.location == "HUB":
                 self.apply_special_capability_effects(aircraft)
-        
+        return True
+
+    def _run_op_custom(self, s: int, consume_c: float, consume_d: float) -> bool:
+        """Launch one operation at spoke s, consuming specified C/D amounts.
+        Does not consume A/B; used by 12h cadence tick to enforce thresholds.
+        """
+        # Gate on current availability: A>=1, B>=1, C/D sufficient
+        row = self.stock[s]
+        if row[0] <= 0.0 or row[1] <= 0.0:
+            return False
+        if row[2] < consume_c or row[3] < consume_d:
+            return False
+        # Consume specified amounts
+        self.stock[s][2] = max(0.0, self.stock[s][2] - float(consume_c))
+        self.stock[s][3] = max(0.0, self.stock[s][3] - float(consume_d))
+        self.ops_by_spoke[s] += 1
+        try:
+            self.op[s] = is_ops_capable(_row_to_spoke(self.stock[s]))
+        except Exception:
+            pass
+        # Log action for renderer visuals
+        self._pending_actions.append((f"SPOKE{s+1}", "OP LAUNCHED"))
         return True
 
     def _initialize_aircraft_attributes(self, aircraft: Aircraft) -> None:
@@ -294,16 +357,41 @@ class LogisticsSim:
         Returns:
             Flight time in hours
         """
-        # Calculate distance between locations
+        # Calculate great-circle proxy distance from cartesian spoke coordinates (in miles)
         distance_miles = self._calculate_distance_from_locations(from_location, to_location)
-        
-        # Convert Mach to miles per hour: speed_mph = speed_mach * 767.269
-        speed_mph = aircraft.speed_mach * 767.269
-        
-        # Return flight time: flight_time = distance / speed_mph
-        flight_time = distance_miles / speed_mph
-        
-        return flight_time
+
+        # Derive airframe performance parameters
+        perf = self._get_aircraft_performance(aircraft)
+        cruise_alt_ft = perf["cruise_alt_ft"]
+        climb_rate_fpm = perf["climb_rate_fpm"]
+        descent_rate_fpm = perf["descent_rate_fpm"]
+        climb_speed_mph = perf["climb_speed_mph"]
+        descent_speed_mph = perf["descent_speed_mph"]
+
+        # Speed of sound varies with altitude; get TAS for cruise
+        cruise_tas_mph = max(1.0, aircraft.speed_mach * self._speed_of_sound_mph(cruise_alt_ft))
+
+        # Optional constant wind component (positive=headwind, negative=tailwind)
+        wind_head_mph = float(getattr(self.cfg, 'wind_component_mph', 0.0))
+        cruise_gs_mph = max(60.0, cruise_tas_mph - wind_head_mph)
+
+        # Climb/descent segments (time and horizontal distance)
+        climb_time_hr = 0.0
+        descent_time_hr = 0.0
+        climb_dist_mi = 0.0
+        descent_dist_mi = 0.0
+        if cruise_alt_ft > 0 and climb_rate_fpm > 0 and descent_rate_fpm > 0:
+            climb_time_hr = (cruise_alt_ft / float(climb_rate_fpm)) / 60.0
+            descent_time_hr = (cruise_alt_ft / float(descent_rate_fpm)) / 60.0
+            climb_dist_mi = climb_time_hr * max(60.0, climb_speed_mph)
+            descent_dist_mi = descent_time_hr * max(60.0, descent_speed_mph)
+
+        # Remaining cruise distance/time
+        cruise_dist_mi = max(0.0, distance_miles - (climb_dist_mi + descent_dist_mi))
+        cruise_time_hr = cruise_dist_mi / cruise_gs_mph if cruise_gs_mph > 0 else 0.0
+
+        # Total time
+        return max(0.0, climb_time_hr + cruise_time_hr + descent_time_hr)
     
     def _calculate_distance_from_locations(self, from_location: str, to_location: str) -> float:
         """Calculate distance between two locations in miles.
@@ -320,7 +408,7 @@ class LogisticsSim:
             if not isinstance(from_location, str) or not isinstance(to_location, str):
                 return 0.0
             
-            # Get coordinates for both locations
+            # Get coordinates for both locations (miles-based polar layout)
             from_coords = self._get_location_coordinates(from_location)
             to_coords = self._get_location_coordinates(to_location)
             
@@ -332,6 +420,41 @@ class LogisticsSim:
         except Exception:
             # Return 0.0 for any errors
             return 0.0
+
+    def _speed_of_sound_mph(self, alt_ft: float) -> float:
+        """Approximate speed of sound (mph) at altitude using ISA troposphere model."""
+        try:
+            alt_m = max(0.0, float(alt_ft)) * 0.3048
+            # Temperature lapse until tropopause (~11km)
+            T0 = 288.15  # K
+            L = 0.0065
+            T = T0 - L * min(11000.0, alt_m)
+            T = max(216.65, T)  # cap at tropopause
+            gamma = 1.4
+            R = 287.05
+            a_ms = (gamma * R * T) ** 0.5
+            return a_ms * 2.23693629  # m/s -> mph
+        except Exception:
+            return 767.269  # sea-level fallback (mph)
+
+    def _get_aircraft_performance(self, aircraft: Aircraft) -> dict:
+        """Get per-airframe climb/descent rates and speeds with sensible defaults."""
+        # Defaults (mph, fpm, feet)
+        table = {
+            "C-130": {"climb_rate_fpm": 1500, "descent_rate_fpm": 2000, "climb_speed_mph": 270, "descent_speed_mph": 280, "cruise_alt_ft": 23000},
+            "C-27": {"climb_rate_fpm": 1400, "descent_rate_fpm": 1800, "climb_speed_mph": 240, "descent_speed_mph": 250, "cruise_alt_ft": 20000},
+            "C-17": {"climb_rate_fpm": 2000, "descent_rate_fpm": 2500, "climb_speed_mph": 300, "descent_speed_mph": 320, "cruise_alt_ft": 35000},
+            "C-5": {"climb_rate_fpm": 1800, "descent_rate_fpm": 2200, "climb_speed_mph": 290, "descent_speed_mph": 300, "cruise_alt_ft": 35000},
+            "Custom_Transport": {"climb_rate_fpm": 1600, "descent_rate_fpm": 2000, "climb_speed_mph": 260, "descent_speed_mph": 270, "cruise_alt_ft": 25000},
+        }
+        perf = table.get(getattr(aircraft, 'typ', ''), {"climb_rate_fpm": 1500, "descent_rate_fpm": 2000, "climb_speed_mph": 260, "descent_speed_mph": 270, "cruise_alt_ft": 25000})
+        # Allow config overrides
+        if hasattr(self.cfg, 'cruise_altitude_ft'):
+            try:
+                perf["cruise_alt_ft"] = int(self.cfg.cruise_altitude_ft)
+            except Exception:
+                pass
+        return perf
 
     def update_simulation_time(self, delta_hours: float) -> None:
         """Update simulation time and handle time progression for all aircraft.
@@ -356,20 +479,191 @@ class LogisticsSim:
             
             # Handle state transitions based on time
             self._update_aircraft_state_timing(aircraft, delta_hours)
+
+            # Accumulate duty minutes while in time-based states (flying or loading)
+            if aircraft.state in ("LEG1_ENROUTE", "AT_SPOKEB_ENROUTE", "RETURN_ENROUTE", "LOADING"):
+                try:
+                    aircraft.duty_minutes += int(max(0, round(delta_hours * 60)))
+                except Exception:
+                    pass
         
-        # Maintain period boundaries for compatibility
-        # Each period represents 12 hours (AM/PM)
-        hours_per_period = 12.0
-        new_period = int(self.current_time_hours / hours_per_period)
-        
-        if new_period != self.t:
-            # Period has changed, update period-based tracking
-            self.t = new_period
-            self.day = new_period // 2
-            self.half = "AM" if new_period % 2 == 0 else "PM"
+        # Schedule departures at fixed intervals
+        try:
+            total_minutes_now = int(self.current_time_hours * 60)
+            interval = int(getattr(self.cfg, 'schedule_interval_minutes', 12*60))
+            if total_minutes_now - self._last_schedule_minute >= interval:
+                self._schedule_departures()
+                self._last_schedule_minute = total_minutes_now
+        except Exception:
+            pass
+
+        # 12-hour cadence tick: A/B consumption everywhere; C/D only if op launched
+        try:
+            total_minutes_now = int(self.current_time_hours * 60)
+            while total_minutes_now >= getattr(self, '_next_ops_tick_minute', 12*60):
+                self._process_12h_tick()
+                self._next_ops_tick_minute += 12 * 60
+        except Exception:
+            pass
+
+        # 12-hour cadence tick: A/B consumption everywhere; C/D only if op launched
+        try:
+            total_minutes_now = int(self.current_time_hours * 60)
+            while total_minutes_now >= getattr(self, '_next_ops_tick_minute', 12*60):
+                self._process_12h_tick()
+                self._next_ops_tick_minute += 12 * 60
+        except Exception:
+            pass
+
+        # Maintain derived clock time for display (24-hour)
+        total_minutes = int(self.current_time_hours * 60)
+        self.day = total_minutes // (24 * 60)
+        # Keep legacy fields updated for backward compatibility
+        self.t = int(self.current_time_hours / 12.0)
+        self.half = "AM" if (self.t % 2 == 0) else "PM"
         
         # Monitor memory usage and perform cleanup if necessary
         self._monitor_memory_usage()
+        
+        # Periodic smart-targeting maintenance and ops sampling
+        try:
+            if total_minutes % max(1, int(getattr(self.cfg, 'schedule_interval_minutes', 12*60))) == 0:
+                if self.smart_targeting:
+                    self.smart_targeting.clear_period_reservations()
+                    self.smart_targeting.decay_recent_service()
+                self.ops_total_history.append(sum(self.ops_by_spoke))
+                if len(self.ops_total_history) > 2000:
+                    self.ops_total_history = self.ops_total_history[-2000:]
+            # Check and initiate rest when at HUB and idle
+            for aircraft in self.fleet:
+                self._maybe_initiate_rest(aircraft, total_minutes)
+        except Exception:
+            pass
+
+    def _rest_threshold_minutes(self, aircraft: Aircraft) -> int:
+        """How many active minutes before rest is required (derived from legacy rest periods)."""
+        max_active_periods = aircraft.max_active_before_rest(self.cfg)
+        return int(max_active_periods * 12 * 60)
+
+    def _rest_duration_minutes(self, aircraft: Aircraft) -> int:
+        """Rest duration window (legacy: one period = 12h)."""
+        return 12 * 60
+
+    def _maybe_initiate_rest(self, aircraft: Aircraft, total_minutes_now: int) -> None:
+        """Start a rest window if duty exceeds threshold and aircraft is idle at hub."""
+        try:
+            if not aircraft.at_hub() or aircraft.state != "IDLE":
+                return
+            if total_minutes_now < aircraft.rest_until_minute:
+                return
+            threshold = self._rest_threshold_minutes(aircraft)
+            if aircraft.duty_minutes >= threshold:
+                # Start rest window
+                aircraft.rest_until_minute = total_minutes_now + self._rest_duration_minutes(aircraft)
+                aircraft.duty_minutes = 0
+                # Emit a user-visible action for renderer/tests
+                self._pending_actions.append((aircraft.name, "INITIATE REST at HUB"))
+        except Exception:
+            pass
+
+    def _emit_pending_actions(self) -> None:
+        if self._pending_actions:
+            self.actions_log.append(self._pending_actions[:])
+            self._pending_actions.clear()
+            self.push_snapshot()
+
+    def _schedule_departures(self) -> None:
+        """Plan and initiate sorties for idle aircraft at the hub."""
+        stage = self.detect_stage()
+        pairs_used = set()
+        total_minutes_now = int(self.current_time_hours * 60)
+        for ac in sorted(self.fleet, key=lambda a: (-a.cap, a.name)):
+            # Skip non-idle
+            if not ac.at_hub() or ac.state != "IDLE":
+                continue
+            # Enforce rest window
+            if total_minutes_now < ac.rest_until_minute:
+                continue
+            # Try smart targeting first
+            if self.smart_targeting:
+                smart_route = self._plan_smart_route(ac, stage)
+                if smart_route:
+                    route, payload_A, payload_B = smart_route
+                    i, j = route
+                    ac.plan = route
+                    ac.payload_A = payload_A[:]
+                    ac.payload_B = payload_B[:]
+                    # Begin loading at HUB
+                    loading_time = ac.calculate_turnover_time()
+                    ac.set_loading_state(loading_time)
+                    self._pending_actions.append((ac.name, f"ONLOAD@HUB→S{i+1}"))
+                    continue
+            # Fallback to pair planning
+            tried = 0
+            cursor = self.pair_cursor
+            chosen_pair = None
+            while tried < len(self.PAIR_ORDER):
+                i, j = self.PAIR_ORDER[cursor]
+                p_i, p_j = self.plan_for_pair_stage(i, j, ac.cap, stage)
+                key = (i, j if p_j and sum(p_j) > 0 else -1)
+                if (sum(p_i) + sum(p_j)) > 0 and key not in pairs_used:
+                    chosen_pair = (i, j)
+                    break
+                cursor = (cursor + 1) % len(self.PAIR_ORDER)
+                tried += 1
+            if chosen_pair is None:
+                continue
+            i, j = chosen_pair
+            p_i, p_j = self.plan_for_pair_stage(i, j, ac.cap, stage)
+            if sum(p_i) == 0 and sum(p_j) == 0:
+                continue
+            leg2_none = False
+            if sum(p_j) == 0:
+                chosen_pair = (i, None)
+                leg2_none = True
+            key = (i, (j if not leg2_none else -1))
+            pairs_used.add(key)
+            self.pair_cursor = (cursor + 1) % len(self.PAIR_ORDER)
+            ac.plan = chosen_pair
+            ac.payload_A = p_i[:]
+            ac.payload_B = p_j[:] if not leg2_none else [0, 0, 0, 0]
+            # Begin loading at HUB
+            loading_time = ac.calculate_turnover_time()
+            ac.set_loading_state(loading_time)
+            self._pending_actions.append((ac.name, f"ONLOAD@HUB→S{i+1}"))
+
+    # New minute-based stepping API -------------------------------------------------
+    def step_time(self, delta_minutes: int | float = 1) -> list | None:
+        """Advance the simulation by the given number of minutes.
+
+        Returns the list of actions that occurred during this time slice for UI consumption.
+        """
+        if self.is_complete():
+            return None
+        # Advance internal clock and time-based state machines
+        self.update_simulation_time(float(delta_minutes) / 60.0)
+        # Apply any queued arrivals for compatibility with legacy arrivals_next behavior
+        self._apply_pending_arrivals()
+        # Emit any pending actions gathered during scheduling/arrivals
+        self._emit_pending_actions()
+        # For compatibility, return last actions if logged this frame; otherwise empty list
+        return self.actions_log[-1] if self.actions_log else []
+
+    def is_complete(self) -> bool:
+        """Signal when the run should end based on configured duration."""
+        try:
+            total_minutes = int(self.current_time_hours * 60)
+            return total_minutes >= int(getattr(self.cfg, "duration_minutes", 30*24*60))
+        except Exception:
+            return False
+
+    def get_clock_hhmm(self) -> str:
+        """Get current simulation clock in 24-hour HH:MM."""
+        total_minutes = max(0, int(self.current_time_hours * 60))
+        minutes_in_day = total_minutes % (24 * 60)
+        hh = minutes_in_day // 60
+        mm = minutes_in_day % 60
+        return f"{hh:02d}:{mm:02d}"
     
     def _update_aircraft_state_timing(self, aircraft: Aircraft, delta_hours: float) -> None:
         """Update aircraft state based on elapsed time.
@@ -385,7 +679,7 @@ class LogisticsSim:
         # Update remaining time and check if state transition should occur
         if aircraft.update_time_remaining(delta_hours):
             # State transition needed
-            if aircraft.state == "ENROUTE":
+            if aircraft.state in ("ENROUTE", "LEG1_ENROUTE", "AT_SPOKEB_ENROUTE", "RETURN_ENROUTE"):
                 # Aircraft has completed its flight leg
                 self._complete_flight_leg(aircraft)
             elif aircraft.state == "LOADING":
@@ -397,44 +691,60 @@ class LogisticsSim:
     
     def _complete_flight_leg(self, aircraft: Aircraft) -> None:
         """Complete a flight leg and transition to next state."""
+        # Handle completion based on the leg/state that just finished
+        # 1) Completed RETURN leg → arrive at HUB and go IDLE
+        if aircraft.state == "RETURN_ENROUTE":
+            aircraft.location = "HUB"
+            aircraft.state = "IDLE"
+            aircraft.plan = None
+            aircraft.time_remaining = 0.0
+            self._pending_actions.append((aircraft.name, "ARRIVE@HUB"))
+            return
+
+        # If no plan is active, just idle at current location
         if aircraft.plan is None:
-            # No plan, return to IDLE at current location
             aircraft.state = "IDLE"
             return
-        
+
         i, j = aircraft.plan
-        
-        if aircraft.location == "HUB":
-            # Starting from HUB, heading to first spoke
+
+        # 2) Completed LEG1 (HUB→S{i+1}) → arrive at S{i+1} and load/unload
+        if aircraft.state == "LEG1_ENROUTE" or aircraft.location == "HUB":
             aircraft.location = f"S{i+1}"
             aircraft.state = "AT_SPOKEA"
-            # Set loading state for cargo operations
             loading_time = aircraft.calculate_turnover_time()
             aircraft.set_loading_state(loading_time)
-        elif aircraft.location.startswith("S") and aircraft.location == f"S{i+1}":
-            # At first spoke, check if going to second spoke
+            return
+
+        # 3) Completed LEG2 (S{i+1}→S{j+1}) → arrive at S{j+1} and load/unload
+        if aircraft.state == "AT_SPOKEB_ENROUTE" and j is not None:
+            aircraft.location = f"S{j+1}"
+            aircraft.state = "AT_SPOKEB"
+            loading_time = aircraft.calculate_turnover_time()
+            aircraft.set_loading_state(loading_time)
+            return
+
+        # 4) Fallbacks: if at first spoke and second leg exists, start it; else return to HUB
+        if aircraft.location.startswith("S") and aircraft.location == f"S{i+1}":
             if j is not None:
-                # Continue to second spoke
-                aircraft.state = "AT_SPOKEB_ENROUTE"
-                # Calculate flight time to second spoke
                 flight_time = self.calculate_flight_time(f"S{i+1}", f"S{j+1}", aircraft)
-                aircraft.set_enroute_state(flight_time)
+                aircraft.set_enroute_state(flight_time, "LEG2")
+                self._pending_actions.append((aircraft.name, f"MOVE S{i+1}→S{j+1}"))
             else:
-                # Return to HUB
-                aircraft.state = "RETURN_ENROUTE"
-                # Calculate flight time back to HUB
                 flight_time = self.calculate_flight_time(f"S{i+1}", "HUB", aircraft)
-                aircraft.set_enroute_state(flight_time)
-        elif aircraft.location.startswith("S") and aircraft.location == f"S{j+1}":
-            # At second spoke, return to HUB
-            aircraft.state = "RETURN_ENROUTE"
-            # Calculate flight time back to HUB
+                aircraft.set_enroute_state(flight_time, "RETURN")
+                self._pending_actions.append((aircraft.name, f"MOVE S{i+1}→HUB"))
+            return
+
+        if j is not None and aircraft.location.startswith("S") and aircraft.location == f"S{j+1}":
             flight_time = self.calculate_flight_time(f"S{j+1}", "HUB", aircraft)
-            aircraft.set_enroute_state(flight_time)
-        else:
-            # Unexpected location, reset to IDLE
-            aircraft.state = "IDLE"
-            aircraft.location = "HUB"
+            aircraft.set_enroute_state(flight_time, "RETURN")
+            self._pending_actions.append((aircraft.name, f"MOVE S{j+1}→HUB"))
+            return
+
+        # 5) Unexpected location/state → reset safely to HUB IDLE
+        aircraft.state = "IDLE"
+        aircraft.location = "HUB"
     
     def _complete_loading(self, aircraft: Aircraft) -> None:
         """Complete loading/unloading operations."""
@@ -443,25 +753,96 @@ class LogisticsSim:
             if aircraft.plan and aircraft.plan[0] is not None:
                 i = aircraft.plan[0]
                 flight_time = self.calculate_flight_time("HUB", f"S{i+1}", aircraft)
-                aircraft.set_enroute_state(flight_time)
+                aircraft.set_enroute_state(flight_time, "LEG1")
+                self._pending_actions.append((aircraft.name, f"MOVE HUB→S{i+1}"))
             else:
                 aircraft.state = "IDLE"
         elif aircraft.location.startswith("S"):
-            # At spoke, check if going to second spoke or returning to HUB
+            # Unload cargo at current spoke immediately at LOADING completion
+            try:
+                if aircraft.plan is not None:
+                    i, j = aircraft.plan
+                    # Decide which payload to offload based on which spoke we're at
+                    if aircraft.location == f"S{i+1}" and sum(aircraft.payload_A) > 0:
+                        self._apply_arrival_at_spoke(i, aircraft.payload_A)
+                        aircraft.payload_A = [0,0,0,0]
+                        self._pending_actions.append((aircraft.name, f"OFFLOAD@S{i+1}"))
+                    elif j is not None and aircraft.location == f"S{j+1}" and sum(aircraft.payload_B) > 0:
+                        self._apply_arrival_at_spoke(j, aircraft.payload_B)
+                        aircraft.payload_B = [0,0,0,0]
+                        self._pending_actions.append((aircraft.name, f"OFFLOAD@S{j+1}"))
+            except Exception:
+                pass
+
+            # After unloading, check if going to second spoke or returning to HUB
             if aircraft.plan and aircraft.plan[1] is not None:
                 # Going to second spoke
                 i, j = aircraft.plan
                 if aircraft.location == f"S{i+1}":
                     flight_time = self.calculate_flight_time(f"S{i+1}", f"S{j+1}", aircraft)
-                    aircraft.set_enroute_state(flight_time)
+                    aircraft.set_enroute_state(flight_time, "LEG2")
+                    self._pending_actions.append((aircraft.name, f"MOVE S{i+1}→S{j+1}"))
                 else:
                     # Return to HUB
                     flight_time = self.calculate_flight_time(aircraft.location, "HUB", aircraft)
-                    aircraft.set_enroute_state(flight_time)
+                    aircraft.set_enroute_state(flight_time, "RETURN")
+                    loc = aircraft.location
+                    self._pending_actions.append((aircraft.name, f"MOVE {loc}→HUB"))
             else:
                 # Return to HUB
                 flight_time = self.calculate_flight_time(aircraft.location, "HUB", aircraft)
-                aircraft.set_enroute_state(flight_time)
+                aircraft.set_enroute_state(flight_time, "RETURN")
+                loc = aircraft.location
+                self._pending_actions.append((aircraft.name, f"MOVE {loc}→HUB"))
+
+    def _apply_arrival_at_spoke(self, spoke_index: int, payload: list[int]) -> None:
+        """Apply delivered resources to a spoke and attempt operations immediately."""
+        for k in range(4):
+            self.stock[spoke_index][k] += payload[k]
+        # Update ops flag and try to run one operation immediately if possible
+        self.op[spoke_index] = is_ops_capable(_row_to_spoke(self.stock[spoke_index]))
+        if self.op[spoke_index]:
+            self.run_op(spoke_index)
+
+    def _process_12h_tick(self) -> None:
+        """Process 12-hour cadence events.
+        - For each spoke: if it has A>=1, B>=1, C>=MIN_C_PER_OP, D>=MIN_D_PER_OP → launch one op (consume 1 C & 1 D).
+        - Consume A/B baseline per cadence across all spokes: 1/(days_per_unit)/2 per 12h tick.
+        """
+        # Snapshot pre-stock for invariants
+        pre_stock = [row[:] for row in self.stock]
+        ops_before = self.ops_by_spoke[:]
+        # 1) Launch operations at eligible spokes
+        for s in range(self.M):
+            try:
+                row = self.stock[s]
+                if row[0] >= 1.0 and row[1] >= 1.0 and row[2] >= float(self.MIN_C_PER_OP) and row[3] >= float(self.MIN_D_PER_OP):
+                    # Launch one op; this will consume 1 C and 1 D and emit an action
+                    self._run_op_custom(s, 1.0, 1.0)
+            except Exception:
+                continue
+        # 2) Baseline A/B consumption at the tick
+        try:
+            a_per_tick = 1.0 / max(1.0, float(self.A_PERIOD_DAYS)) / 2.0
+        except Exception:
+            a_per_tick = 0.5  # Fallback: 1 per day → 0.5 per 12h
+        try:
+            b_per_tick = 1.0 / max(1.0, float(self.B_PERIOD_DAYS)) / 2.0
+        except Exception:
+            b_per_tick = 0.5
+        for s in range(self.M):
+            try:
+                self.stock[s][0] = max(0.0, float(self.stock[s][0]) - a_per_tick)
+                self.stock[s][1] = max(0.0, float(self.stock[s][1]) - b_per_tick)
+            except Exception:
+                pass
+        # 3) Refresh ops flags and integrity check
+        try:
+            for s in range(self.M):
+                self.op[s] = is_ops_capable(_row_to_spoke(self.stock[s]))
+            self.check_invariants(pre_stock, ops_before)
+        except Exception:
+            pass
     
     def _complete_maintenance(self, aircraft: Aircraft) -> None:
         """Complete maintenance and return to IDLE state."""
@@ -515,6 +896,21 @@ class LogisticsSim:
         total_cost = base_cost * flight_hours * aircraft_multiplier * capability_multiplier
         
         return total_cost
+
+    def _apply_pending_arrivals(self) -> None:
+        """Apply queued arrivals from arrivals_next to stock and refresh ops flags."""
+        try:
+            for s in range(self.M):
+                if self.arrivals_next[s]:
+                    for vec in self.arrivals_next[s]:
+                        for k in range(4):
+                            self.stock[s][k] += vec[k]
+                    self.arrivals_next[s].clear()
+                    # Refresh operational flag after applying arrivals
+                    self.op[s] = is_ops_capable(_row_to_spoke(self.stock[s]))
+        except Exception:
+            # Be tolerant of malformed arrivals queues
+            pass
     
     def calculate_fuel_cost(self, aircraft: Aircraft, flight_hours: float) -> float:
         """Calculate fuel cost for an aircraft based on flight hours.
@@ -665,13 +1061,13 @@ class LogisticsSim:
             'cost_history_count': len(self.cost_history)
         }
 
-    def build_fleet(self, label: str) -> List[Aircraft]:
+    def build_fleet(self, label: str) -> list[Aircraft]:
         """Build fleet from label or custom fleet composition."""
         logger = logging.getLogger(__name__)
         
         # Use the Fleet Builder pallet as the single source of truth
         try:
-            from cargosim.ui.fleet_builder import get_fleet_builder, FleetComposition
+            from cargosim.ui.fleet_builder import FleetComposition, get_fleet_builder
             fleet_builder = get_fleet_builder()
             
             # Get the current fleet from the Fleet Builder pallet
@@ -832,13 +1228,13 @@ class LogisticsSim:
                         aircraft_counter[aircraft_type] = 1
                     
                     if aircraft_type == "C-130":
-                        for i in range(count):
+                        for _ in range(count):
                             ac = Aircraft("C-130", self.cfg.cap_c130, f"C-130 #{aircraft_counter[aircraft_type]}")
                             self._initialize_aircraft_attributes(ac)
                             aircraft.append(ac)
                             aircraft_counter[aircraft_type] += 1
                     elif aircraft_type == "C-27":
-                        for i in range(count):
+                        for _ in range(count):
                             ac = Aircraft("C-27", self.cfg.cap_c27, f"C-27 #{aircraft_counter[aircraft_type]}")
                             self._initialize_aircraft_attributes(ac)
                             aircraft.append(ac)
@@ -846,11 +1242,13 @@ class LogisticsSim:
                     elif aircraft_type == "Custom_Transport":
                         # Handle custom transport with its configured attributes
                         try:
-                            from cargosim.ui.fleet_builder import get_aircraft_config_manager
+                            from cargosim.ui.fleet_builder import (
+                                get_aircraft_config_manager,
+                            )
                             config_manager = get_aircraft_config_manager()
                             if aircraft_type in config_manager.aircraft_types:
                                 custom_type = config_manager.aircraft_types[aircraft_type]
-                                for i in range(count):
+                                for _ in range(count):
                                     custom_aircraft = Aircraft(
                                         aircraft_type, 
                                         custom_type.base_capacity, 
@@ -862,14 +1260,14 @@ class LogisticsSim:
                                     aircraft_counter[aircraft_type] += 1
                             else:
                                 # Fallback to default custom transport
-                                for i in range(count):
+                                for _ in range(count):
                                     ac = Aircraft(aircraft_type, 4, f"Custom Transport #{aircraft_counter[aircraft_type]}")
                                     self._initialize_aircraft_attributes(ac)
                                     aircraft.append(ac)
                                     aircraft_counter[aircraft_type] += 1
                         except Exception:
                             # Fallback to default custom transport
-                            for i in range(count):
+                            for _ in range(count):
                                 ac = Aircraft(aircraft_type, 4, f"Custom Transport #{aircraft_counter[aircraft_type]}")
                                 self._initialize_aircraft_attributes(ac)
                                 aircraft.append(ac)
@@ -877,11 +1275,13 @@ class LogisticsSim:
                     else:
                         # For other aircraft types, try to get from fleet builder
                         try:
-                            from cargosim.ui.fleet_builder import get_aircraft_config_manager
+                            from cargosim.ui.fleet_builder import (
+                                get_aircraft_config_manager,
+                            )
                             config_manager = get_aircraft_config_manager()
                             if aircraft_type in config_manager.aircraft_types:
                                 aircraft_type_config = config_manager.aircraft_types[aircraft_type]
-                                for i in range(count):
+                                for _ in range(count):
                                     new_aircraft = Aircraft(
                                         aircraft_type, 
                                         aircraft_type_config.base_capacity, 
@@ -894,14 +1294,14 @@ class LogisticsSim:
                                     aircraft_counter[aircraft_type] += 1
                             else:
                                 # Fallback to default capacity
-                                for i in range(count):
+                                for _ in range(count):
                                     ac = Aircraft(aircraft_type, 5, f"{aircraft_type} #{aircraft_counter[aircraft_type]}")
                                     self._initialize_aircraft_attributes(ac)
                                     aircraft.append(ac)
                                     aircraft_counter[aircraft_type] += 1
                         except Exception:
                             # Fallback to default capacity
-                            for i in range(count):
+                            for _ in range(count):
                                 ac = Aircraft(aircraft_type, 5, f"{aircraft_type} #{aircraft_counter[aircraft_type]}")
                                 self._initialize_aircraft_attributes(ac)
                                 aircraft.append(ac)
@@ -914,7 +1314,7 @@ class LogisticsSim:
         
         raise ValueError(f"Unknown fleet label: {label}")
     
-    def _build_fleet_from_composition(self, fleet_composition) -> List[Aircraft]:
+    def _build_fleet_from_composition(self, fleet_composition) -> list[Aircraft]:
         """Build fleet from FleetComposition object."""
         aircraft = []
         aircraft_counter = {}
@@ -923,7 +1323,7 @@ class LogisticsSim:
             if aircraft_id not in aircraft_counter:
                 aircraft_counter[aircraft_id] = 1
             
-            for i in range(count):
+            for _ in range(count):
                 if aircraft_id == "C-130":
                     ac = Aircraft("C-130", self.cfg.cap_c130, f"C-130 #{aircraft_counter[aircraft_id]}")
                     self._initialize_aircraft_attributes(ac)
@@ -935,7 +1335,9 @@ class LogisticsSim:
                 elif aircraft_id == "Custom_Transport":
                     # Handle custom transport with its configured attributes
                     try:
-                        from cargosim.ui.fleet_builder import get_aircraft_config_manager
+                        from cargosim.ui.fleet_builder import (
+                            get_aircraft_config_manager,
+                        )
                         config_manager = get_aircraft_config_manager()
                         if aircraft_id in config_manager.aircraft_types:
                             custom_type = config_manager.aircraft_types[aircraft_id]
@@ -961,7 +1363,9 @@ class LogisticsSim:
                 else:
                     # For other aircraft types, try to get from fleet builder
                     try:
-                        from cargosim.ui.fleet_builder import get_aircraft_config_manager
+                        from cargosim.ui.fleet_builder import (
+                            get_aircraft_config_manager,
+                        )
                         config_manager = get_aircraft_config_manager()
                         if aircraft_id in config_manager.aircraft_types:
                             aircraft_type = config_manager.aircraft_types[aircraft_id]
@@ -1008,12 +1412,12 @@ class LogisticsSim:
             
         self.smart_targeting.initialize_positions(hub_pos, spoke_positions)
     
-    def update_targeting_positions(self, hub_pos: Tuple[int, int], spoke_positions: List[Tuple[int, int]]):
+    def update_targeting_positions(self, hub_pos: tuple[int, int], spoke_positions: list[tuple[int, int]]):
         """Update hub and spoke positions for smart targeting (called from renderer)."""
         if self.smart_targeting:
             self.smart_targeting.initialize_positions(hub_pos, spoke_positions)
     
-    def _plan_smart_route(self, aircraft: Aircraft, stage: str) -> Optional[Tuple[Tuple[int, Optional[int]], List[int], List[int]]]:
+    def _plan_smart_route(self, aircraft: Aircraft, stage: str) -> tuple[tuple[int, int | None], list[int], list[int]] | None:
         """Plan a route for an aircraft using smart targeting with distance and cost optimization."""
         if not self.smart_targeting:
             return None
@@ -1082,7 +1486,7 @@ class LogisticsSim:
         # Single-leg mission
         return (first_spoke_idx, None), payload_A, [0, 0, 0, 0]
     
-    def _find_closest_feasible_spoke(self, from_location: str, aircraft: Aircraft, stage: str) -> Optional[int]:
+    def _find_closest_feasible_spoke(self, from_location: str, aircraft: Aircraft, stage: str) -> int | None:
         """Find the closest spoke that's within aircraft range and has operational needs.
         
         Args:
@@ -1136,7 +1540,7 @@ class LogisticsSim:
             # Need C and D for operations
             return stock[2] < 1 or stock[3] < 1
     
-    def _plan_payload_for_spoke(self, spoke_idx: int, capacity: int, stage: str) -> List[int]:
+    def _plan_payload_for_spoke(self, spoke_idx: int, capacity: int, stage: str) -> list[int]:
         """Plan payload for a specific spoke based on current needs and stage."""
         payload = [0, 0, 0, 0]
         remaining_capacity = capacity
@@ -1240,7 +1644,7 @@ class LogisticsSim:
         
         return payload
 
-    def calculate_optimal_route(self, from_location: str, to_location: str, aircraft: Aircraft) -> Tuple[float, float]:
+    def calculate_optimal_route(self, from_location: str, to_location: str, aircraft: Aircraft) -> tuple[float, float]:
         """Calculate optimal route between two locations considering aircraft capabilities.
         
         Args:
@@ -1315,7 +1719,7 @@ class LogisticsSim:
         # Check if distance is within range
         return distance_miles <= aircraft_range
     
-    def _find_optimal_hub_to_spoke_route(self, target_spoke: str, aircraft: Aircraft) -> Tuple[float, float]:
+    def _find_optimal_hub_to_spoke_route(self, target_spoke: str, aircraft: Aircraft) -> tuple[float, float]:
         """Find optimal route from HUB to target spoke.
         
         Args:
@@ -1368,7 +1772,7 @@ class LogisticsSim:
         flight_time = self.calculate_flight_time("HUB", target_spoke, aircraft)
         return direct_distance, flight_time
     
-    def _find_optimal_spoke_to_hub_route(self, source_spoke: str, aircraft: Aircraft) -> Tuple[float, float]:
+    def _find_optimal_spoke_to_hub_route(self, source_spoke: str, aircraft: Aircraft) -> tuple[float, float]:
         """Find optimal route from source spoke to HUB.
         
         Args:
@@ -1421,7 +1825,7 @@ class LogisticsSim:
         flight_time = self.calculate_flight_time(source_spoke, "HUB", aircraft)
         return direct_distance, flight_time
     
-    def _find_optimal_spoke_to_spoke_route(self, from_spoke: str, to_spoke: str, aircraft: Aircraft) -> Tuple[float, float]:
+    def _find_optimal_spoke_to_spoke_route(self, from_spoke: str, to_spoke: str, aircraft: Aircraft) -> tuple[float, float]:
         """Find optimal route between two spokes.
         
         Args:
@@ -1478,36 +1882,51 @@ class LogisticsSim:
         return "OPS"
 
     def plan_for_pair_stage(self, i: int, j: int, cap_left: int, stage: str):
-        p_i = [0,0,0,0]; p_j = [0,0,0,0]; rem = cap_left
+        p_i = [0, 0, 0, 0]
+        p_j = [0, 0, 0, 0]
+        rem = cap_left
+
         def give(target_idx: int, k: int, need: int):
             nonlocal rem
-            if rem <= 0 or need <= 0: return
+            if rem <= 0 or need <= 0:
+                return
             x = min(rem, need)
-            if target_idx == i: p_i[k] += x
-            else: p_j[k] += x
+            if target_idx == i:
+                p_i[k] += x
+            else:
+                p_j[k] += x
             rem -= x
 
-        needA_i = max(0, 1 - self.stock[i][0]); needB_i = max(0, 1 - self.stock[i][1])
-        needA_j = max(0, 1 - self.stock[j][0]); needB_j = max(0,  1 - self.stock[j][1])
-        needC_i = max(0, 1 - self.stock[i][2]); needD_i = max(0,  1 - self.stock[i][3])
-        needC_j = max(0,  1 - self.stock[j][2]); needD_j = max(0,  1 - self.stock[j][3])
+        needA_i = max(0, 1 - self.stock[i][0])
+        needB_i = max(0, 1 - self.stock[i][1])
+        needA_j = max(0, 1 - self.stock[j][0])
+        needB_j = max(0, 1 - self.stock[j][1])
+        needC_i = max(0, 1 - self.stock[i][2])
+        needD_i = max(0, 1 - self.stock[i][3])
+        needC_j = max(0, 1 - self.stock[j][2])
+        needD_j = max(0, 1 - self.stock[j][3])
 
         if stage == "A":
-            give(i,0,needA_i); give(j,0,needA_j)
-            give(i,1,needB_i); give(j,1,needB_j)
-            give(i,0, max(0, 2 - (self.stock[i][0] + p_i[0])))
-            give(j,0, max(0, 2 - (self.stock[j][0] + p_j[0])))
+            give(i, 0, needA_i)
+            give(j, 0, needA_j)
+            give(i, 1, needB_i)
+            give(j, 1, needB_j)
+            give(i, 0, max(0, 2 - (self.stock[i][0] + p_i[0])))
+            give(j, 0, max(0, 2 - (self.stock[j][0] + p_j[0])))
         elif stage == "B":
-            give(i,1,needB_i); give(j,1,needB_j)
-            give(i,0, max(0, 2 - self.stock[i][0]))
-            give(j,0, max(0, 2 - self.stock[j][0]))
+            give(i, 1, needB_i)
+            give(j, 1, needB_j)
+            give(i, 0, max(0, 2 - self.stock[i][0]))
+            give(j, 0, max(0, 2 - self.stock[j][0]))
         else:  # "OPS"
-            give(i,2,needC_i); give(j,2,needC_j)
-            give(i,3,needD_i); give(j,3,needD_j)
-            give(i,2, max(0, 2 - (self.stock[i][2] + p_i[2])))
-            give(j,2, max(0, 2 - (self.stock[j][2] + p_j[2])))
-            give(i,3, max(0, 2 - (self.stock[i][3] + p_i[3])))
-            give(j,3, max(0, 2 - (self.stock[j][3] + p_j[3])))
+            give(i, 2, needC_i)
+            give(j, 2, needC_j)
+            give(i, 3, needD_i)
+            give(j, 3, needD_j)
+            give(i, 2, max(0, 2 - (self.stock[i][2] + p_i[2])))
+            give(j, 2, max(0, 2 - (self.stock[j][2] + p_j[2])))
+            give(i, 3, max(0, 2 - (self.stock[i][3] + p_i[3])))
+            give(j, 3, max(0, 2 - (self.stock[j][3] + p_j[3])))
 
         return p_i, p_j
 
@@ -1555,9 +1974,11 @@ class LogisticsSim:
             if self.arrivals_next[s]:
                 add = [0,0,0,0]
                 for vec in self.arrivals_next[s]:
-                    for k in range(4): add[k] += vec[k]
+                    for k in range(4):
+                        add[k] += vec[k]
                 self.arrivals_next[s].clear()
-                for k in range(4): self.stock[s][k] += add[k]
+                for k in range(4):
+                    self.stock[s][k] += add[k]
 
         # 2) RECOMPUTE_STATE_SNAPSHOTS (flags derived from stock)
         stage = self.detect_stage()
@@ -1566,15 +1987,10 @@ class LogisticsSim:
         for s in range(self.M):
             self.op[s] = is_ops_capable(_row_to_spoke(self.stock[s]))
         
-        actions_this_period: List[Tuple[str,str]] = []
+        actions_this_period: list[tuple[str,str]] = []
         pairs_used = set()  # ensure unique pair per period across all aircraft
         
-        # 2.5) LAUNCH OPERATIONS IMMEDIATELY when spokes are operational
-        for s in range(self.M):
-            if is_ops_capable(_row_to_spoke(self.stock[s])):
-                # Launch operation if this spoke is operational
-                self.run_op(s)
-                actions_this_period.append((f"SPOKE{s+1}", "OPERATION LAUNCHED"))
+        # [removed legacy auto-launch] Operations are launched on 12h cadence ticks
 
         # 3) Aircraft actions
         for ac in sorted(self.fleet, key=lambda a: (-a.cap, a.name)):
@@ -1584,8 +2000,8 @@ class LogisticsSim:
                 continue
 
             events = 0
-            def consume_event():
-                nonlocal events, ac
+            def consume_event(ac=ac):
+                nonlocal events
                 events += 1
                 if events == 1:
                     ac.active_periods += 1
@@ -1673,7 +2089,8 @@ class LogisticsSim:
                         actions_this_period.append((ac.name, f"ONLOAD@HUB→S{i+1}"))
                         ac.state = "LEG1_ENROUTE"
                         actions_this_period.append((ac.name, f"MOVE HUB→S{i+1}"))
-                        consume_event(); consume_event()
+                        consume_event()
+                        consume_event()
                         
                         # Update service tracking
                         self.smart_targeting.update_recent_service(i)
@@ -1717,24 +2134,17 @@ class LogisticsSim:
                 actions_this_period.append((ac.name, f"ONLOAD@HUB→S{i+1}"))
                 ac.state = "LEG1_ENROUTE"
                 actions_this_period.append((ac.name, f"MOVE HUB→S{i+1}"))
-                consume_event(); consume_event()
+                consume_event()
+                consume_event()
 
-        # 4) PM_CONSUMPTION
-        if self.t % 2 == 1:
-            self.day = self.t // 2
-            if (self.day % self.A_PERIOD_DAYS) == (self.A_PERIOD_DAYS - 1):
-                for s in range(self.M):
-                    if self.stock[s][0] > 0 and self.stock[s][1] > 0:
-                        self.stock[s][0] = max(0, self.stock[s][0] - 1)
-            if (self.day % self.B_PERIOD_DAYS) == (self.B_PERIOD_DAYS - 1):
-                for s in range(self.M):
-                    if self.stock[s][0] > 0 and self.stock[s][1] > 0:
-                        self.stock[s][1] = max(0, self.stock[s][1] - 1)
+        # 4) PM_CONSUMPTION (legacy) -- No longer used in minute-based model
+        # Consumption is now handled via continuous-time arrivals and immediate ops where applicable.
 
         # Note: Operational flags are already updated earlier in the method
 
         self.check_invariants(pre_stock, ops_before)
         self.actions_log.append(actions_this_period)
+        # Maintain legacy counters for compatibility
         self.t += 1
         self.half = "AM" if self.t % 2 == 0 else "PM"
         self.ops_total_history.append(sum(self.ops_by_spoke))
@@ -1745,7 +2155,7 @@ class LogisticsSim:
 
         if self.cfg.debug_mode:
             from cargosim.core.utils import append_debug
-            lines = [f"[t={self.t} {self.half} day={self.t//2}] ops={self.ops_count()}"]
+            lines = [f"[clock={self.get_clock_hhmm()} day={self.day}] ops={self.ops_count()}"]
             lines += [f"  {nm}: {act}" for (nm, act) in actions_this_period]
             append_debug(lines)
 
@@ -1826,7 +2236,7 @@ class LogisticsSim:
         return sum(self.op)
 
     def check_invariants(self, pre_stock, ops_before):
-        violations: List[str] = []
+        violations: list[str] = []
         for s in range(self.M):
             row = self.stock[s]
             assert all(v >= -1e-9 for v in row)
@@ -1900,28 +2310,28 @@ class LogisticsSim:
             return float('inf')
     
     def _optimize_time_step(self, delta_hours: float) -> float:
-        """Optimize time step to minimize floating-point errors.
-        
-        Args:
-            delta_hours: Proposed time increment
-            
-        Returns:
-            Optimized time increment
+        """Optimize time step to minimize floating-point errors without stalling minute steps.
+
+        - Caps excessively large steps to avoid jumps.
+        - Rounds to nearest minute (1/60 hour) instead of 0.1 hour to preserve 1-minute ticks.
         """
         # Validate time step
         if delta_hours <= 0.0:
             return 0.0
-        
+
         # Limit time step to prevent large jumps
         max_time_step = 6.0  # Maximum 6 hours per step
         if delta_hours > max_time_step:
             delta_hours = max_time_step
-        
-        # Round to reasonable precision to minimize floating-point errors
-        # Use 0.1 hour (6 minute) precision
-        precision = 0.1
-        delta_hours = round(delta_hours / precision) * precision
-        
+
+        # Round to nearest minute to reduce FP noise while keeping small increments
+        # Using multiplication avoids precision issues for 1/60 increments.
+        minutes = round(delta_hours * 60.0)
+        if minutes <= 0 and delta_hours > 0.0:
+            # Ensure forward progress for sub-minute positive deltas
+            minutes = 1
+        delta_hours = minutes / 60.0
+
         return delta_hours
     
     def _monitor_memory_usage(self) -> None:
@@ -2026,7 +2436,7 @@ class LogisticsSim:
         
         return best_route
 
-    def _calculate_route_options(self, start: str, end: str, aircraft: Aircraft) -> List[dict]:
+    def _calculate_route_options(self, start: str, end: str, aircraft: Aircraft) -> list[dict]:
         """Calculate multiple route options between two points."""
         routes = []
         
@@ -2113,7 +2523,7 @@ class LogisticsSim:
             'efficiency_score': self._calculate_efficiency_score(total_distance, total_flight_time, total_fuel)
         }
 
-    def _calculate_weather_affected_routes(self, start: str, end: str, aircraft: Aircraft) -> List[dict]:
+    def _calculate_weather_affected_routes(self, start: str, end: str, aircraft: Aircraft) -> list[dict]:
         """Calculate weather-affected route alternatives."""
         if not self.weather_considerations:
             return []
@@ -2132,7 +2542,7 @@ class LogisticsSim:
         
         return routes
 
-    def _calculate_detour_routes(self, start: str, end: str, aircraft: Aircraft) -> List[dict]:
+    def _calculate_detour_routes(self, start: str, end: str, aircraft: Aircraft) -> list[dict]:
         """Calculate detour routes to avoid poor weather."""
         # This is a simplified implementation
         # In a real system, this would use actual weather data and routing algorithms
@@ -2181,7 +2591,7 @@ class LogisticsSim:
             'efficiency_score': self._calculate_efficiency_score(total_distance, total_flight_time, total_fuel)
         }
 
-    def _evaluate_routes_multi_objective(self, routes: List[dict], aircraft: Aircraft) -> dict:
+    def _evaluate_routes_multi_objective(self, routes: list[dict], aircraft: Aircraft) -> dict:
         """Evaluate routes using multi-objective optimization."""
         if not routes:
             return None
@@ -2218,7 +2628,7 @@ class LogisticsSim:
         
         return best_route
 
-    def _normalize_route_scores(self, routes: List[dict]) -> List[dict]:
+    def _normalize_route_scores(self, routes: list[dict]) -> list[dict]:
         """Normalize route scores for multi-objective comparison."""
         if not routes:
             return []
@@ -2265,7 +2675,7 @@ class LogisticsSim:
         # Normalize to 0-1 scale
         return min(1.0, efficiency / 1000.0)  # Arbitrary normalization factor
 
-    def _get_location_coordinates(self, location: str) -> Optional[Tuple[float, float]]:
+    def _get_location_coordinates(self, location: str) -> tuple[float, float] | None:
         """Get coordinates for a location."""
         try:
             if not isinstance(location, str):
@@ -2288,9 +2698,14 @@ class LogisticsSim:
                         
                     spoke_idx = int(spoke_str) - 1
                     if 0 <= spoke_idx < self.M:
-                        # Calculate spoke position in a circle around hub
+                        # Miles-based polar layout: radius equals hub->spoke distance in miles
                         angle = 2 * math.pi * spoke_idx / self.M
-                        radius = 100.0  # Arbitrary radius
+                        distances = getattr(self.cfg, 'spoke_distances', []) or []
+                        if isinstance(distances, list) and len(distances) == self.M:
+                            radius = float(distances[spoke_idx])
+                            radius = max(0.0, radius)
+                        else:
+                            radius = 100.0
                         x = radius * math.cos(angle)
                         y = radius * math.sin(angle)
                         return (x, y)
@@ -2301,18 +2716,20 @@ class LogisticsSim:
         except Exception:
             return None
 
-    def _calculate_distance(self, coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
+    def _calculate_distance(self, coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
         """Calculate Euclidean distance between two coordinates."""
         try:
-            # Ensure coordinates are valid tuples of numbers
+            # Ensure coordinates are valid tuples of length 2
             if (not isinstance(coord1, tuple) or not isinstance(coord2, tuple) or
-                len(coord1) != 2 or len(coord2) != 2 or
-                not isinstance(coord1[0], (int, float)) or not isinstance(coord1[1], (int, float)) or
-                not isinstance(coord2[0], (int, float)) or not isinstance(coord2[1], (int, float))):
+                len(coord1) != 2 or len(coord2) != 2):
                 return 0.0
-            
-            dx = coord2[0] - coord1[0]
-            dy = coord2[1] - coord1[1]
+
+            # Coerce to floats to validate numeric input
+            x1, y1 = float(coord1[0]), float(coord1[1])
+            x2, y2 = float(coord2[0]), float(coord2[1])
+
+            dx = x2 - x1
+            dy = y2 - y1
             return math.sqrt(dx * dx + dy * dy)
         except (TypeError, ValueError, AttributeError):
             # Return 0.0 for any calculation errors
@@ -2501,7 +2918,7 @@ class LogisticsSim:
             'optimization_history_size': len(self.optimization_history)
         }
 
-    def _calculate_coordinate_distance(self, coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
+    def _calculate_coordinate_distance(self, coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
         """Calculate Euclidean distance between two coordinates."""
         dx = coord2[0] - coord1[0]
         dy = coord2[1] - coord1[1]
