@@ -1655,6 +1655,13 @@ class SpokeConfigurationPanel(ttk.Frame):
         
         # Initialize instance variables
         self.distance_vars = []
+        self.last_valid_distances: List[float] = []  # Tracks last valid values per spoke
+        self.last_valid_spoke_count: int = 10        # Tracks last valid spoke count
+        self.distance_entries: List[tk.Entry] = []   # Keep references to entry widgets
+        # Distance constraints
+        self._DIST_MIN = 100.0
+        self._DIST_MAX = 1200.0
+        self._DIST_DEFAULT = 500.0
         # Always assume variable spoke count is enabled
         self.var_spoke_count = tk.BooleanVar(value=True)
         self.spoke_count_var = tk.IntVar(value=10)
@@ -1806,9 +1813,9 @@ class SpokeConfigurationPanel(ttk.Frame):
         try:
             # Trace variable writes (fires on any value change)
             self.spoke_count_var.trace('w', lambda *args: self._on_spoke_count_changed())
-            # Commit on Enter key and when focus leaves the widget
-            self.spoke_count_spinner.bind('<Return>', lambda e: self._on_spoke_count_changed())
-            self.spoke_count_spinner.bind('<FocusOut>', lambda e: self._on_spoke_count_changed())
+            # Sanitize on Enter key and when focus leaves the widget
+            self.spoke_count_spinner.bind('<Return>', self._sanitize_and_apply_spoke_count)
+            self.spoke_count_spinner.bind('<FocusOut>', self._sanitize_and_apply_spoke_count)
         except Exception:
             # Be tolerant if running on older Tk versions
             pass
@@ -2033,21 +2040,33 @@ class SpokeConfigurationPanel(ttk.Frame):
         """Create distance input fields for each spoke."""
         try:
             logger.debug("Creating distance inputs for spokes")
-            
+
             # Clear existing inputs
             for widget in self.distances_container.winfo_children():
                 widget.destroy()
-            
+
             # Clear distance variables list
+            old_distance_vars = getattr(self, 'distance_vars', [])
+            old_last_valid = list(getattr(self, 'last_valid_distances', []))
             self.distance_vars.clear()
-            
+            # Clear and recreate entries list
+            try:
+                self.distance_entries.clear()
+            except Exception:
+                self.distance_entries = []
+
             # Get the current spoke count
-            spoke_count = self.spoke_count_var.get()
+            # Be tolerant of transient empty input in the spinbox
+            try:
+                spoke_count = self.spoke_count_var.get()
+            except Exception:
+                # Fall back to last valid count
+                spoke_count = self.last_valid_spoke_count or 10
             logger.debug(f"Creating distance inputs for {spoke_count} spokes")
-            
+
             # Ensure spoke count is within valid range
             spoke_count = max(1, min(20, spoke_count))
-            
+
             # Create grid for distance inputs
             for i in range(spoke_count):
                 row = i // 5  # 5 columns per row
@@ -2057,7 +2076,7 @@ class SpokeConfigurationPanel(ttk.Frame):
                 label = ttk.Label(self.distances_container, text=f"Spoke {i+1}:")
                 label.grid(row=row, column=col*2, padx=(0, 4), pady=2, sticky="e")
                 
-                # Distance input
+                # Distance input (use StringVar-friendly DoubleVar; value may be temporarily empty)
                 distance_var = tk.DoubleVar(value=500.0)
                 distance_entry = ttk.Entry(self.distances_container, 
                                          textvariable=distance_var,
@@ -2065,13 +2084,26 @@ class SpokeConfigurationPanel(ttk.Frame):
                                          validate="key",
                                          validatecommand=(self.register(self._validate_distance), '%P'))
                 distance_entry.grid(row=row, column=col*2+1, padx=(0, 8), pady=2, sticky="w")
-                
+
                 # Store reference to variable
                 self.distance_vars.append(distance_var)
-                
+                # Store entry reference and bind sanitize on commit
+                self.distance_entries.append(distance_entry)
+                distance_entry.bind('<Return>', lambda e, i=i: self._sanitize_distance_and_apply(i))
+                distance_entry.bind('<FocusOut>', lambda e, i=i: self._sanitize_distance_and_apply(i))
+
                 # Bind change event using a proper method reference
                 distance_var.trace('w', self._create_distance_change_callback(i))
-            
+
+            # Resize last_valid_distances to match current spoke count, preserving prior values
+            new_last_valid: List[float] = []
+            for i in range(spoke_count):
+                if i < len(old_last_valid):
+                    new_last_valid.append(float(old_last_valid[i]))
+                else:
+                    new_last_valid.append(500.0)
+            self.last_valid_distances = new_last_valid
+
             logger.debug(f"Successfully created {spoke_count} distance input fields")
             
             # Update preview after creating inputs
@@ -2134,16 +2166,124 @@ class SpokeConfigurationPanel(ttk.Frame):
         def callback(*args):
             self._on_distance_changed(index)
         return callback
-    
+
     def _validate_distance(self, value):
-        """Validate distance input (100-1200 miles)."""
+        """Validate distance input while typing.
+
+        Be permissive to allow smooth editing: allow empty string and any
+        string that parses as float, plus transitional states like '-', '.', '-.'.
+        Range enforcement is done on commit (Enter/FocusOut).
+        """
         if value == "":
             return True
         try:
-            distance = float(value)
-            return 100.0 <= distance <= 1200.0
+            float(value)
+            return True
         except ValueError:
-            return False
+            # Allow some transitional inputs during typing
+            return value in {"-", ".", "-."}
+
+    def _safe_get_spoke_count(self, default: Optional[int] = None) -> Optional[int]:
+        """Safely get the spoke count from the IntVar/spinbox, tolerating empty input."""
+        # Try IntVar first
+        try:
+            count = self.spoke_count_var.get()
+            self.last_valid_spoke_count = int(count)
+            return int(count)
+        except Exception:
+            pass
+        # Try reading raw text from the spinbox widget
+        try:
+            raw = self.spoke_count_spinner.get().strip()
+            if raw == "":
+                return default
+            count = int(raw)
+            self.last_valid_spoke_count = int(count)
+            return int(count)
+        except Exception:
+            return default
+
+    def _safe_get_distance(self, index: int) -> Optional[float]:
+        """Safely get a distance value; return None if the field is temporarily empty/invalid."""
+        try:
+            value = float(self.distance_vars[index].get())
+            # Clamp to valid range
+            value = max(self._DIST_MIN, min(self._DIST_MAX, value))
+            # Update last valid cache
+            if index < len(self.last_valid_distances):
+                self.last_valid_distances[index] = value
+            return value
+        except Exception:
+            # Return None to indicate an in-progress/invalid edit state
+            return None
+
+    def _sanitize_distance_and_apply(self, index: int):
+        """On commit (Enter/FocusOut), coerce the input to a valid float or default."""
+        try:
+            entry = self.distance_entries[index]
+        except Exception:
+            entry = None
+        raw = None
+        try:
+            raw = entry.get().strip() if entry else None
+        except Exception:
+            raw = None
+
+        # Convert to float; on failure, use default
+        try:
+            val = float(raw) if raw not in (None, "") else self._DIST_DEFAULT
+        except Exception:
+            val = self._DIST_DEFAULT
+
+        # Clamp to nearest valid number
+        val = max(self._DIST_MIN, min(self._DIST_MAX, float(val)))
+
+        # Apply back to UI and state
+        try:
+            self.distance_vars[index].set(val)
+        except Exception:
+            pass
+        if index < len(self.last_valid_distances):
+            self.last_valid_distances[index] = float(val)
+
+        # Update preview and schedule save
+        try:
+            self._update_preview()
+        except Exception:
+            pass
+        try:
+            self._schedule_config_save(200)
+        except Exception:
+            pass
+        if self.on_config_changed:
+            try:
+                self.on_config_changed()
+            except Exception:
+                pass
+
+    def _sanitize_and_apply_spoke_count(self, event=None):
+        """On commit, coerce the spoke count to a valid int in range or default."""
+        # Read raw text from spinbox
+        try:
+            raw = self.spoke_count_spinner.get().strip()
+        except Exception:
+            raw = ""
+
+        # Convert to int; on failure, use last valid or default
+        try:
+            val = int(raw)
+        except Exception:
+            val = self.last_valid_spoke_count or 10
+
+        # Clamp to valid range
+        val = max(1, min(20, int(val)))
+
+        # Set the variable; var trace will trigger reflow/update
+        try:
+            self.spoke_count_var.set(val)
+        except Exception:
+            pass
+        self.last_valid_spoke_count = int(val)
     
     def _on_variable_spoke_count_changed(self):
         """Handle variable spoke count toggle change (no longer used but kept for compatibility)."""
@@ -2385,10 +2525,13 @@ class SpokeConfigurationPanel(ttk.Frame):
     def _on_spoke_count_changed(self):
         """Handle spoke count change."""
         try:
-            # Validate the new spoke count
-            new_count = self.spoke_count_var.get()
+            # Validate the new spoke count (tolerate empty input during edits)
+            new_count = self._safe_get_spoke_count(default=self.last_valid_spoke_count)
+            if new_count is None:
+                # User is mid-edit (e.g., empty); do not force errors
+                return
             logger.info(f"Spoke count changed to: {new_count}")
-            
+
             if new_count < 1 or new_count > 20:
                 logger.warning(f"Invalid spoke count: {new_count}, resetting to valid range")
                 if new_count < 1:
@@ -2398,14 +2541,14 @@ class SpokeConfigurationPanel(ttk.Frame):
                     self.spoke_count_var.set(20)
                     logger.info("Spoke count reset to maximum: 20")
                 return
-            
+
             logger.debug(f"Spoke count validation passed: {new_count}")
-            
+
             # IMPORTANT: Update the configuration BEFORE recreating distance inputs
             # This ensures the configuration reflects the new spoke count
             current_config = self.get_config()
             current_config['max_spokes'] = new_count
-            
+
             # Generate new spoke distances for the new count
             new_distances = []
             for i in range(new_count):
@@ -2415,22 +2558,25 @@ class SpokeConfigurationPanel(ttk.Frame):
                 else:
                     # Generate new distances for additional spokes
                     new_distances.append(100 + (i * 50))
-            
+
             current_config['spoke_distances'] = new_distances
             current_config['variable_spoke_count'] = True
-            
+
             # Update the configuration in the UI
             self.spoke_count_var.set(new_count)
-            
+            self.last_valid_spoke_count = int(new_count)
+
             # Recreate distance inputs with new count
             logger.debug(f"Recreating distance inputs for {new_count} spokes")
             self._create_distance_inputs()
-            
+
             # Update the distance variables with the new configuration
             for i, distance in enumerate(new_distances):
                 if i < len(self.distance_vars):
                     self.distance_vars[i].set(distance)
-            
+                    if i < len(self.last_valid_distances):
+                        self.last_valid_distances[i] = float(distance)
+
             # Consolidate save
             logger.info(f"Scheduling save for updated configuration with {new_count} spokes")
             self._schedule_config_save(150)
@@ -2453,8 +2599,11 @@ class SpokeConfigurationPanel(ttk.Frame):
     def _on_distance_changed(self, index):
         """Handle distance input change."""
         try:
-            # Get the new distance value
-            new_distance = self.distance_vars[index].get()
+            # Get the new distance value safely (tolerate empty/invalid input during edits)
+            new_distance = self._safe_get_distance(index)
+            if new_distance is None:
+                # Skip processing until a valid value is present
+                return
             logger.debug(f"Distance changed for spoke {index + 1}: {new_distance} miles")
             
             self._update_preview()
@@ -2468,9 +2617,8 @@ class SpokeConfigurationPanel(ttk.Frame):
             logger.debug(f"Distance change for spoke {index + 1} processed successfully")
             
         except Exception as e:
-            logger.error(f"Error in distance change for spoke {index + 1}: {e}")
-            self._show_spoke_config_error("Distance Change Error", 
-                                        f"Failed to update distance configuration.\n\nError: {str(e)}")
+            # Be forgiving during typing; avoid noisy dialogs for transient states
+            logger.warning(f"Error in distance change for spoke {index + 1}: {e}")
     
     def _update_preview(self):
         """Update the geographic layout preview."""
@@ -2584,43 +2732,37 @@ class SpokeConfigurationPanel(ttk.Frame):
     def _load_current_config(self):
         """Load current configuration values."""
         try:
-            # Try to get configuration from the parent fleet builder tab
-            parent = self.winfo_parent()
-            while parent:
+            # Try to get configuration from the parent fleet builder tab (walk widget objects)
+            parent_widget = self
+            while True:
+                parent_widget = getattr(parent_widget, 'master', None)
+                if not parent_widget:
+                    break
                 try:
-                    if hasattr(parent, 'fleet_builder') and hasattr(parent.fleet_builder, 'get_spoke_configuration'):
-                        # Load from fleet builder's stored configuration
-                        stored_config = parent.fleet_builder.get_spoke_configuration()
+                    if hasattr(parent_widget, 'fleet_builder') and hasattr(parent_widget.fleet_builder, 'get_spoke_configuration'):
+                        stored_config = parent_widget.fleet_builder.get_spoke_configuration()
                         if stored_config:
                             self.set_config(stored_config)
                             logger.info("Loaded spoke configuration from fleet builder")
                             return
                 except Exception:
                     pass
-                
-                try:
-                    parent = parent.winfo_parent()
-                except Exception:
-                    break
             
-            # Try to get configuration from the main GUI configuration
-            parent = self.winfo_parent()
-            while parent:
+            # Try to get configuration from the main GUI configuration (walk widget objects)
+            parent_widget = self
+            while True:
+                parent_widget = getattr(parent_widget, 'master', None)
+                if not parent_widget:
+                    break
                 try:
-                    if hasattr(parent, 'cfg') and hasattr(parent.cfg, 'spoke_config'):
-                        # Load from main GUI configuration
-                        main_config = parent.cfg.spoke_config
+                    if hasattr(parent_widget, 'cfg') and hasattr(parent_widget.cfg, 'spoke_config'):
+                        main_config = parent_widget.cfg.spoke_config
                         if main_config:
                             self.set_config(main_config)
                             logger.info("Loaded spoke configuration from main GUI config")
                             return
                 except Exception:
                     pass
-                
-                try:
-                    parent = parent.winfo_parent()
-                except Exception:
-                    break
             
             # If no configuration found, use defaults
             logger.info("No saved spoke configuration found, using defaults")
@@ -2655,23 +2797,39 @@ class SpokeConfigurationPanel(ttk.Frame):
         try:
             if not self.distance_vars:
                 return {}
-            
+
             # Ensure the configuration is consistent
+            # Tolerate empty edits by falling back to last valid values
+            distances: List[float] = []
+            for i in range(len(self.distance_vars)):
+                value = self._safe_get_distance(i)
+                if value is None:
+                    # Fall back to last valid or a sensible default
+                    if i < len(self.last_valid_distances):
+                        value = float(self.last_valid_distances[i])
+                    else:
+                        value = 500.0
+                distances.append(value)
+
+            max_spokes_val = self._safe_get_spoke_count(default=self.last_valid_spoke_count)
+            if max_spokes_val is None:
+                max_spokes_val = len(distances) if distances else 10
+
             config = {
                 'variable_spoke_count': True,  # Always True since we removed the checkbox
-                'max_spokes': self.spoke_count_var.get(),
-                'spoke_distances': [var.get() for var in self.distance_vars]
+                'max_spokes': int(max_spokes_val),
+                'spoke_distances': distances,
             }
-            
+
             # Validate spoke distances
             if config['spoke_distances']:
                 config['spoke_distances'] = [
                     max(100.0, min(1200.0, distance)) 
                     for distance in config['spoke_distances']
                 ]
-            
+
             return config
-            
+
         except Exception as e:
             logger.error(f"Error getting config: {e}")
             # Return safe defaults on error
@@ -2686,19 +2844,28 @@ class SpokeConfigurationPanel(ttk.Frame):
         try:
             # Always set variable spoke count to True
             self.var_spoke_count.set(True)
-            
+
             if 'max_spokes' in config:
                 self.spoke_count_var.set(config['max_spokes'])
+                try:
+                    self.last_valid_spoke_count = int(config['max_spokes'])
+                except Exception:
+                    pass
                 # Create distance inputs after setting the spoke count
                 self._create_distance_inputs()
-            
+
             if 'spoke_distances' in config:
                 distances = config['spoke_distances']
                 if self.distance_vars:
                     for i, var in enumerate(self.distance_vars):
                         if i < len(distances):
                             var.set(distances[i])
-            
+                            if i < len(self.last_valid_distances):
+                                try:
+                                    self.last_valid_distances[i] = float(distances[i])
+                                except Exception:
+                                    pass
+
             # Ensure spinner state is correct after loading config
             self._update_spinner_state()
             

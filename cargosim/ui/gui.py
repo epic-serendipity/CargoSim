@@ -73,7 +73,7 @@ class ControlGUI:
                 pass
             
             log_runtime_event("Setting up root window properties")
-            root.title("CargoSim â€” Control Panel")
+            root.title("CargoSim - Control Panel")
             
             # Make fullscreen by default
             root.state('zoomed')  # Windows fullscreen
@@ -138,10 +138,10 @@ class ControlGUI:
                 self.configuration_manager = get_configuration_manager()
                 # Set the current configuration in the manager
                 if self.configuration_manager:
+                    # Use public API method name defined in ConfigurationManager
                     self.configuration_manager.set_configuration(self.cfg)
-                log_runtime_event("ConfigurationManager initialized with current configuration")
             except Exception as e:
-                log_runtime_event("Failed to initialize ConfigurationManager", f"error={e}")
+                log_runtime_event("Failed to initialize configuration manager", f"error={e}")
                 self.configuration_manager = None
 
             # Add configuration health monitoring
@@ -213,8 +213,19 @@ class ControlGUI:
             log_runtime_event("ControlGUI initialization completed successfully")
             
         except Exception as e:
-            log_exception(e, "ControlGUI initialization")
+            # Ensure any initialization error is logged and surfaced
+            try:
+                log_exception(e, "ControlGUI initialization failed")
+            except Exception:
+                pass
+            messagebox.showerror("Initialization Error", f"Failed to initialize GUI: {e}")
             raise
+        finally:
+            # Always try to update status bar message
+            try:
+                self._update_status_bar("Ready - Press F11 to toggle fullscreen")
+            except Exception:
+                pass
 
     def _setup_style(self):
         """Set up minimal Tkinter styles - comprehensive theming is handled by ui_theme.py."""
@@ -511,13 +522,13 @@ class ControlGUI:
         timing_frame.grid(row=0, column=0, sticky="ew", pady=(0, 16))
         timing_frame.grid_columnconfigure(1, weight=1)
         
-        # Periods configuration with better layout
-        ttk.Label(timing_frame, text="Periods (AM/PM):", style="Header.TLabel", 
+        # Duration configuration (minutes)
+        ttk.Label(timing_frame, text="Duration (minutes):", style="Header.TLabel", 
                  font=font_manager.get_font('medium', 'bold')).grid(row=0, column=0, sticky="w", pady=(0, 8))
-        self.periods_var = tk.IntVar(value=self.cfg.periods)
-        periods_spin = ttk.Spinbox(timing_frame, from_=2, to=2000, textvariable=self.periods_var, 
+        self.duration_minutes_var = tk.IntVar(value=getattr(self.cfg, 'duration_minutes', 30*24*60))
+        duration_spin = ttk.Spinbox(timing_frame, from_=60, to=60*180, textvariable=self.duration_minutes_var, 
                                   width=15, justify="center")
-        periods_spin.grid(row=0, column=1, sticky="w", padx=(16, 0))
+        duration_spin.grid(row=0, column=1, sticky="w", padx=(16, 0))
         
         # Time scale controls (Phase 3 enhancement)
         ttk.Label(timing_frame, text="Time Scale (simulation speed):", style="Header.TLabel", 
@@ -548,7 +559,7 @@ class ControlGUI:
         pause_resume_frame.grid(row=2, column=0, columnspan=2, sticky="w", pady=(16, 0))
         
         self.simulation_paused = tk.BooleanVar(value=False)
-        pause_resume_btn = ttk.Button(pause_resume_frame, text="â¸ Pause", 
+        pause_resume_btn = ttk.Button(pause_resume_frame, text="Pause", 
                                     command=self._toggle_simulation_pause)
         pause_resume_btn.pack(side="left")
         
@@ -563,8 +574,8 @@ class ControlGUI:
                                         foreground="green")
         self.total_cost_label.grid(row=0, column=1, sticky="w", padx=(16, 0))
         
-        # Cost per period/hour
-        ttk.Label(cost_frame, text="Cost per Period:", style="Header.TLabel").grid(row=1, column=0, sticky="w")
+        # Cost per hour
+        ttk.Label(cost_frame, text="Cost per Hour:", style="Header.TLabel").grid(row=1, column=0, sticky="w")
         self.cost_per_period_label = ttk.Label(cost_frame, text="$0.00", style="Muted.TLabel")
         self.cost_per_period_label.grid(row=1, column=1, sticky="w", padx=(16, 0))
         
@@ -585,8 +596,8 @@ class ControlGUI:
         cost_trend_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(16, 0))
         
         ttk.Label(cost_trend_frame, text="Cost Trend Graph:", style="Header.TLabel").pack(anchor="w")
-        cost_graph_placeholder = ttk.Label(cost_trend_frame, text="ðŸ“Š Cost trend visualization will appear here", 
-                                         style="Muted.TLabel", justify="center")
+        cost_graph_placeholder = ttk.Label(cost_trend_frame, text="Cost trend visualization will appear here", 
+                                          style="Muted.TLabel", justify="center")
         cost_graph_placeholder.pack(expand=True, pady=20)
         
         # Real-time statistics overlay
@@ -877,18 +888,18 @@ class ControlGUI:
         help_frame.grid_columnconfigure(0, weight=1)
         
         help_text = [
-            "â€¢ Side Panels: Show operational data during simulation",
-            "â€¢ Statistics Overlay: Display real-time performance metrics", 
-            "â€¢ Aircraft Orientation: Rotate aircraft to show flight direction",
-            "â€¢ Aircraft Labels: Show identification tags on aircraft",
-            "â€¢ Header: Display simulation status and operational summary",
-            "â€¢ Bar Scale: Control how resource bars are scaled",
-            "â€¢ Right Panel: Choose what operational data to display",
-            "â€¢ Cursor Color: Select highlight color for better visibility"
+            "Side Panels: Show operational data during simulation",
+            "Statistics Overlay: Display real-time performance metrics", 
+            "Aircraft Orientation: Rotate aircraft to show flight direction",
+            "Aircraft Labels: Show identification tags on aircraft",
+            "Header: Display simulation status and operational summary",
+            "Bar Scale: Control how resource bars are scaled",
+            "Right Panel: Choose what operational data to display",
+            "Cursor Color: Select highlight color for better visibility"
         ]
         
         for i, help_line in enumerate(help_text):
-            ttk.Label(help_frame, text=f"â€¢ {help_line}", style="Muted.TLabel", 
+            ttk.Label(help_frame, text=f"- {help_line}", style="Muted.TLabel", 
                      wraplength=250).grid(row=i, column=0, sticky="w", pady=4)
 
     def build_theme_tab(self, tab):
@@ -937,14 +948,14 @@ class ControlGUI:
         info_frame.grid_columnconfigure(0, weight=1)
         
         info_text = [
-            "â€¢ Choose from predefined theme presets",
-            "â€¢ Themes automatically apply when selected",
-            "â€¢ Each theme has unique color schemes",
-            "â€¢ Customize aircraft color schemes separately"
+            "Choose from predefined theme presets",
+            "Themes automatically apply when selected",
+            "Each theme has unique color schemes",
+            "Customize aircraft color schemes separately"
         ]
         
         for i, info_line in enumerate(info_text):
-            ttk.Label(info_frame, text=f"â€¢ {info_line}", style="Muted.TLabel", 
+            ttk.Label(info_frame, text=f"- {info_line}", style="Muted.TLabel", 
                      wraplength=350).grid(row=i, column=0, sticky="w", pady=6)
         
         # Center column - Color Preview
@@ -999,14 +1010,14 @@ class ControlGUI:
         custom_frame.grid_columnconfigure(0, weight=1)
         
         custom_text = [
-            "â€¢ Colors automatically update when theme changes",
-            "â€¢ Preview shows the current theme's color palette",
-            "â€¢ Aircraft colors can be customized independently",
-            "â€¢ Changes are applied immediately"
+            "Colors automatically update when theme changes",
+            "Preview shows the current theme's color palette",
+            "Aircraft colors can be customized independently",
+            "Changes are applied immediately"
         ]
         
         for i, custom_line in enumerate(custom_text):
-            ttk.Label(custom_frame, text=f"â€¢ {custom_line}", style="Muted.TLabel", 
+            ttk.Label(custom_frame, text=f"- {custom_line}", style="Muted.TLabel", 
                      wraplength=350).grid(row=i, column=0, sticky="w", pady=6)
         
         # Right column - Aircraft Colors
@@ -1035,14 +1046,14 @@ class ControlGUI:
         colorset_info_frame.grid_columnconfigure(0, weight=1)
         
         colorset_info_text = [
-            "â€¢ Choose aircraft color schemes",
-            "â€¢ Different schemes for different aircraft types",
-            "â€¢ Colors apply to all aircraft in simulation",
-            "â€¢ Can be changed independently of themes"
+            "Choose aircraft color schemes",
+            "Different schemes for different aircraft types",
+            "Colors apply to all aircraft in simulation",
+            "Can be changed independently of themes"
         ]
         
         for i, info_line in enumerate(colorset_info_text):
-            ttk.Label(colorset_info_frame, text=f"â€¢ {info_line}", style="Muted.TLabel", 
+            ttk.Label(colorset_info_frame, text=f"- {info_line}", style="Muted.TLabel", 
                      wraplength=250).grid(row=i, column=0, sticky="w", pady=6)
     
     def _on_theme_change(self, *args):
@@ -1169,32 +1180,50 @@ class ControlGUI:
         gameplay_frame.grid(row=0, column=0, sticky="ew", pady=(0, 16))
         gameplay_frame.grid_columnconfigure(1, weight=1)
         
-        # Period duration with better layout
-        period_row = ttk.Frame(gameplay_frame)
-        period_row.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
-        period_row.grid_columnconfigure(1, weight=1)
+        # Ticks per second (simulation speed)
+        tps_row = ttk.Frame(gameplay_frame)
+        tps_row.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        tps_row.grid_columnconfigure(1, weight=1)
         
-        ttk.Label(period_row, text="Period duration (seconds):", style="Header.TLabel", 
+        ttk.Label(tps_row, text="Ticks per second:", style="Header.TLabel", 
                  font=font_manager.get_font('medium', 'bold'), width=25, anchor="w").grid(row=0, column=0, sticky="w")
-        self.period_seconds_var = tk.DoubleVar(value=self.cfg.period_seconds)
+        # Backed by IntVar with a DoubleVar for the scale
+        self.ticks_per_second_var = tk.IntVar(value=getattr(self.cfg, 'ticks_per_second', 120))
+        self._tps_scale_var = tk.DoubleVar(value=float(self.ticks_per_second_var.get()))
         
-        # Create a function to update the entry field when slider changes and ensure 0.1 increments
-        def update_period_entry(*args):
-            # Get current value and round to nearest 0.1
-            current_value = self.period_seconds_var.get()
-            rounded_value = round(current_value * 10) / 10  # Round to 1 decimal place
-            # Only update if the value actually changed (prevents infinite loops)
-            if abs(current_value - rounded_value) > 0.001:
-                self.period_seconds_var.set(rounded_value)
+        def _on_tps_scale(val):
+            try:
+                v = int(round(float(val)))
+            except Exception:
+                v = self.ticks_per_second_var.get()
+            v = max(10, min(500, v))
+            if v != self.ticks_per_second_var.get():
+                self.ticks_per_second_var.set(v)
+            # snap the scale handle to the integer value
+            if abs(self._tps_scale_var.get() - v) > 0.001:
+                self._tps_scale_var.set(v)
         
-        period_scale = ttk.Scale(period_row, from_=0.1, to=10.0, 
-                                variable=self.period_seconds_var, orient="horizontal", 
-                                style="Green.Horizontal.TScale",
-                                command=update_period_entry)
-        period_scale.grid(row=0, column=1, sticky="ew", padx=(16, 12))
+        tps_scale = ttk.Scale(tps_row, from_=10, to=500,
+                              variable=self._tps_scale_var, orient="horizontal",
+                              style="Green.Horizontal.TScale",
+                              command=_on_tps_scale)
+        tps_scale.grid(row=0, column=1, sticky="ew", padx=(16, 12))
         
-        period_entry = ttk.Entry(period_row, textvariable=self.period_seconds_var, width=10, justify="center")
-        period_entry.grid(row=0, column=2, sticky="w")
+        # Spinbox entry for exact value
+        tps_spin = ttk.Spinbox(tps_row, from_=10, to=500, textvariable=self.ticks_per_second_var,
+                               width=10, justify="center")
+        tps_spin.grid(row=0, column=2, sticky="w")
+        
+        # Keep scale in sync when typing in spinbox
+        def _sync_scale_from_spin(*_):
+            try:
+                v = int(self.ticks_per_second_var.get())
+            except Exception:
+                v = 120
+            v = max(10, min(500, v))
+            if abs(self._tps_scale_var.get() - v) > 0.001:
+                self._tps_scale_var.set(v)
+        self.ticks_per_second_var.trace_add('write', _sync_scale_from_spin)
         
         # Target FPS with better layout
         fps_row = ttk.Frame(gameplay_frame)
@@ -1214,14 +1243,14 @@ class ControlGUI:
         info_frame.grid_columnconfigure(0, weight=1)
         
         info_text = [
-            "â€¢ Period Duration: Controls simulation speed",
-            "â€¢ Target FPS: Affects animation smoothness",
-            "â€¢ Higher FPS = smoother animation",
-            "â€¢ Lower period duration = faster simulation"
+            "Ticks/sec: Controls simulation speed",
+            "Target FPS: Affects animation smoothness",
+            "Higher FPS = smoother visuals",
+            "Higher ticks/sec = faster sim"
         ]
         
         for i, info_line in enumerate(info_text):
-            ttk.Label(info_frame, text=f"â€¢ {info_line}", style="Muted.TLabel", 
+            ttk.Label(info_frame, text=f"- {info_line}", style="Muted.TLabel", 
                      wraplength=350).grid(row=i, column=0, sticky="w", pady=6)
 
         # Center column - Debug Settings
@@ -1258,15 +1287,16 @@ class ControlGUI:
         debug_info_frame.grid(row=1, column=0, sticky="ew")
         debug_info_frame.grid_columnconfigure(0, weight=1)
         
+        # Use ASCII-safe bullets/arrows to avoid encoding artifacts in UI
         debug_info_text = [
-            "â€¢ Debug Mode: Shows detailed simulation data",
-            "â€¢ Press D to cycle: OFF â†’ BASIC â†’ DETAILED",
-            "â€¢ Press F12 as alternative toggle",
-            "â€¢ Random Seed: Ensures reproducible results"
+            "Debug Mode: Shows detailed simulation data",
+            "Press D to cycle: OFF -> BASIC -> DETAILED",
+            "Press F12 as alternative toggle",
+            "Random Seed: Ensures reproducible results"
         ]
         
         for i, info_line in enumerate(debug_info_text):
-            ttk.Label(debug_info_frame, text=f"â€¢ {info_line}", style="Muted.TLabel", 
+            ttk.Label(debug_info_frame, text=f"- {info_line}", style="Muted.TLabel", 
                      wraplength=350).grid(row=i, column=0, sticky="w", pady=6)
 
         # Right column - Launch Settings and Help
@@ -1288,14 +1318,14 @@ class ControlGUI:
         launch_info_frame.grid_columnconfigure(0, weight=1)
         
         launch_info_text = [
-            "â€¢ Fullscreen: Maximizes simulation window",
-            "â€¢ Windowed: Standard window mode",
-            "â€¢ Can be toggled during simulation",
-            "â€¢ F11 toggles fullscreen mode"
+            "Fullscreen: Maximizes simulation window",
+            "Windowed: Standard window mode",
+            "Can be toggled during simulation",
+            "F11 toggles fullscreen mode"
         ]
         
         for i, info_line in enumerate(launch_info_text):
-            ttk.Label(launch_info_frame, text=f"â€¢ {info_line}", style="Muted.TLabel", 
+            ttk.Label(launch_info_frame, text=f"- {info_line}", style="Muted.TLabel", 
                      wraplength=250).grid(row=i, column=0, sticky="w", pady=6)
         
         # Help section
@@ -1304,14 +1334,14 @@ class ControlGUI:
         help_frame.grid_columnconfigure(0, weight=1)
         
         help_text = [
-            "â€¢ D: Cycle debug levels",
-            "â€¢ F11: Toggle fullscreen",
-            "â€¢ F12: Alternative debug toggle",
-            "â€¢ ESC: Return to menu"
+            "D: Cycle debug levels",
+            "F11: Toggle fullscreen",
+            "F12: Alternative debug toggle",
+            "ESC: Return to menu"
         ]
         
         for i, help_line in enumerate(help_text):
-            ttk.Label(help_frame, text=f"â€¢ {help_line}", style="Muted.TLabel", 
+            ttk.Label(help_frame, text=f"- {help_line}", style="Muted.TLabel", 
                      wraplength=250).grid(row=i, column=0, sticky="w", pady=4)
 
     def build_record_tab(self, tab):
@@ -1409,12 +1439,12 @@ class ControlGUI:
         ttk.Separator(help_frame).pack(fill="x", pady=(0, 8))
         
         help_text = [
-            "â€¢ Live Recording: Captures simulation in real-time",
-            "â€¢ Offline Recording: Generates high-quality output files",
-            "â€¢ MP4: Video format with compression (smaller files)",
-            "â€¢ PNG: Image sequence (larger files, better quality)",
-            "â€¢ Async Writer: Improves performance during recording",
-            "â€¢ Queue Size: Memory buffer for smooth recording"
+            "- Live Recording: Captures simulation in real-time",
+            "- Offline Recording: Generates high-quality output files",
+            "- MP4: Video format with compression (smaller files)",
+            "- PNG: Image sequence (larger files, better quality)",
+            "- Async Writer: Improves performance during recording",
+            "- Queue Size: Memory buffer for smooth recording"
         ]
         
         for help_line in help_text:
@@ -1482,12 +1512,12 @@ class ControlGUI:
         ttk.Separator(info_frame).pack(fill="x", pady=12)
         
         ttk.Label(info_frame, text="During Simulation", style="Header.TLabel").pack(anchor="w", pady=(0, 8))
-        ttk.Label(info_frame, text="â€¢ Press ESC to pause and access the menu\n"
-                                   "â€¢ Press G to return to this Control Panel\n"
-                                   "â€¢ Use F11 to toggle fullscreen mode\n"
-                                   "â€¢ Press D to cycle through debug levels (OFFâ†’BASICâ†’DETAILED)\n"
-                                   "â€¢ Press F12 as alternative debug toggle\n"
-                                   "â€¢ Debug mode shows real-time simulation data and logs",
+        ttk.Label(info_frame, text="- Press ESC to pause and access the menu\n"
+                                   "- Press G to return to this Control Panel\n"
+                                   "- Use F11 to toggle fullscreen mode\n"
+                                   "- Press D to cycle through debug levels (OFF->BASIC->DETAILED)\n"
+                                   "- Press F12 as alternative debug toggle\n"
+                                   "- Debug mode shows real-time simulation data and logs",
                   style="Muted.TLabel", justify="left").pack(anchor="w")
 
     def _update_dep_state(self):
@@ -1504,7 +1534,7 @@ class ControlGUI:
             pygame_available = False
         
         if not pygame_available:
-            msg.append("pygame missing â€” simulation disabled")
+            msg.append("pygame missing - simulation disabled")
             self.start_btn.state(["disabled"])
         
         if pygame_available:
@@ -1512,7 +1542,7 @@ class ControlGUI:
         
         mp4_ok, _ = _mp4_available()
         if not mp4_ok:
-            msg.append("imageio-ffmpeg missing â€” MP4 disabled")
+            msg.append("imageio-ffmpeg missing - MP4 disabled")
         
         self.dep_msg.configure(text=("; ".join(msg) if msg else "All dependencies available."))
 
@@ -1740,8 +1770,8 @@ class ControlGUI:
                 logger.warning(f"Could not restore spoke configuration: {e}")
             
             # Simulation Parameters tab
-            if hasattr(self, 'periods_var'):
-                self.cfg.periods = self.periods_var.get()
+            if hasattr(self, 'duration_minutes_var'):
+                self.cfg.duration_minutes = self.duration_minutes_var.get()
             if hasattr(self, 'initA'):
                 self.cfg.init_A = self.initA.get()
                 self.cfg.init_B = self.initB.get()
@@ -1774,7 +1804,11 @@ class ControlGUI:
             self.cfg.theme.ac_colorset = self.airframe_colorset_var.get()
             
             # Gameplay tab
-            self.cfg.period_seconds = self.period_seconds_var.get()
+            # Use ticks per second (10..500)
+            try:
+                self.cfg.ticks_per_second = int(self.ticks_per_second_var.get())
+            except Exception:
+                self.cfg.ticks_per_second = 120
             self.cfg.fps = self.fps_var.get()
             self.cfg.debug_mode = self.debug_mode_var.get()
             self.cfg.seed = self.seed_var.get()
@@ -1825,6 +1859,14 @@ class ControlGUI:
                 logger.info("Fleet persistence not available for saving fleet on close")
         except Exception as e:
             logger.warning(f"Could not save fleet on window close: {e}")
+        
+        # Save full configuration to ensure persistence across sessions
+        try:
+            if hasattr(self, '_read_back_to_cfg') and self._read_back_to_cfg():
+                from cargosim.core.config import save_config
+                save_config(self.cfg)
+        except Exception:
+            pass
         
         # Perform cleanup of timers and workers, then destroy the window
         try:
@@ -2034,8 +2076,8 @@ class ControlGUI:
     def _reset_simulation_params(self):
         """Reset simulation parameters to defaults."""
         # Reset to default values from config
-        if hasattr(self, 'periods_var'):
-            self.periods_var.set(100)
+        if hasattr(self, 'duration_minutes_var'):
+            self.duration_minutes_var.set(30*24*60)
         if hasattr(self, 'initA'):
             self.initA.set(10)
             self.initB.set(10)
@@ -2070,14 +2112,14 @@ class ControlGUI:
         """Update the parameter summary display."""
         if hasattr(self, 'param_summary_label'):
             try:
-                periods = self.periods_var.get()
+                duration_minutes = self.duration_minutes_var.get() if hasattr(self, 'duration_minutes_var') else 0
                 init_a = self.initA.get()
                 init_b = self.initB.get()
                 init_c = self.initC.get()
                 init_d = self.initD.get()
                 unlimited = self.unlimited_var.get()
                 
-                summary_text = f"Periods: {periods}\nInitial A: {init_a}\nInitial B: {init_b}\nInitial C: {init_c}\nInitial D: {init_d}\nUnlimited: {'Yes' if unlimited else 'No'}"
+                summary_text = f"Duration: {duration_minutes} min\nInitial A: {init_a}\nInitial B: {init_b}\nInitial C: {init_c}\nInitial D: {init_d}\nUnlimited: {'Yes' if unlimited else 'No'}"
                 
                 self.param_summary_label.configure(text=summary_text)
             except Exception:
@@ -2290,21 +2332,21 @@ class ControlGUI:
         """Toggle simulation pause/resume state."""
         if self.simulation_paused.get():
             self.simulation_paused.set(False)
-            self.pause_resume_btn.config(text="â¸ Pause")
+            self.pause_resume_btn.config(text="Pause")
             # Resume simulation logic would go here
         else:
             self.simulation_paused.set(True)
-            self.pause_resume_btn.config(text="â–¶ Resume")
+            self.pause_resume_btn.config(text="Resume")
             # Pause simulation logic would go here
     
-    def update_cost_display(self, total_cost: float, cost_per_period: float):
+    def update_cost_display(self, total_cost: float, cost_per_hour: float):
         """Update the cost display with current values."""
         try:
             # Update total cost
             self.total_cost_label.config(text=f"${total_cost:,.2f}")
             
-            # Update cost per period
-            self.cost_per_period_label.config(text=f"${cost_per_period:,.2f}")
+            # Update cost per hour
+            self.cost_per_period_label.config(text=f"${cost_per_hour:,.2f}")
             
             # Update budget remaining
             try:
@@ -3209,7 +3251,9 @@ class ControlGUI:
 
     def _start_performance_monitoring(self):
         """Start real-time performance monitoring."""
-        if not hasattr(self, 'performance_monitor') or not self.performance_monitor:
+        if (not hasattr(self, 'performance_monitor') or not self.performance_monitor
+                or not getattr(self, 'performance_monitoring_var', None)
+                or (hasattr(self, 'performance_monitoring_var') and not self.performance_monitoring_var.get())):
             return
         
         # Start monitoring thread
@@ -3233,8 +3277,13 @@ class ControlGUI:
                 memory = psutil.virtual_memory()
                 
                 # Track metrics
-                self.performance_monitor.track_metric('cpu_usage', cpu_percent)
-                self.performance_monitor.track_metric('memory_usage', memory.used / 1024 / 1024)  # MB
+                try:
+                    if self.performance_monitor:
+                        self.performance_monitor.track_metric('cpu_usage', cpu_percent)
+                        self.performance_monitor.track_metric('memory_usage', memory.used / 1024 / 1024)  # MB
+                except Exception:
+                    # If monitor is unavailable mid-run, stop loop gracefully
+                    break
                 
                 # Update GUI if needed
                 try:
@@ -3830,15 +3879,15 @@ class ControlGUI:
             help_buttons_frame = ttk.Frame(help_frame)
             help_buttons_frame.pack(fill="x", pady=8)
             
-            help_btn = ttk.Button(help_buttons_frame, text="ðŸ“š Help System", 
+            help_btn = ttk.Button(help_buttons_frame, text="Help System", 
                                 command=self._show_help_system, style="Primary.TButton")
             help_btn.pack(side="left", padx=(0, 10))
             
-            quick_help_btn = ttk.Button(help_buttons_frame, text="â“ Quick Help", 
+            quick_help_btn = ttk.Button(help_buttons_frame, text="Quick Help", 
                                       command=self._show_quick_help, style="Secondary.TButton")
             quick_help_btn.pack(side="left", padx=(0, 10))
             
-            user_guide_btn = ttk.Button(help_buttons_frame, text="ðŸ“– User Guide", 
+            user_guide_btn = ttk.Button(help_buttons_frame, text="User Guide", 
                                       command=self._open_user_guide, style="Secondary.TButton")
             user_guide_btn.pack(side="left", padx=(0, 10))
             
@@ -4118,7 +4167,7 @@ class ControlGUI:
             pygame_available = False
         
         if not pygame_available:
-            msg.append("pygame missing â€” simulation disabled")
+            msg.append("pygame missing - simulation disabled")
             self.start_btn.state(["disabled"])
         
         if pygame_available:
@@ -4126,7 +4175,7 @@ class ControlGUI:
         
         mp4_ok, _ = _mp4_available()
         if not mp4_ok:
-            msg.append("imageio-ffmpeg missing â€” MP4 disabled")
+            msg.append("imageio-ffmpeg missing - MP4 disabled")
         
         self.dep_msg.configure(text=("; ".join(msg) if msg else "All dependencies available."))
 
@@ -4136,4 +4185,3 @@ if __name__ == "__main__":
     from cargosim.__main__ import main
     import sys
     sys.exit(main())
-
